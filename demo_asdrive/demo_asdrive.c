@@ -109,7 +109,8 @@ void http_get_task(void *pvParameters)
             successes++;
         close(s);
         printf("successes = %d failures = %d\r\n", successes, failures);
-        for(int countdown = 10; countdown >= 0; countdown--) {
+        int countdown;
+        for(countdown = 10; countdown >= 0; countdown--) {
             printf("%d... ", countdown);
             vTaskDelay(1000 / portTICK_RATE_MS);
         }

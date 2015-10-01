@@ -1,7 +1,6 @@
 # args for passing into compile rule generation
-asdrive_MAIN = $(asdrive_ROOT)src
+asdrive_MAIN = $(asdrive_ROOT)asdrive
 
-INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/linkd/
 INC_DIRS +=$(asdrive_MAIN)/fsm/src/
 INC_DIRS +=$(asdrive_MAIN)/jsmn/
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/
@@ -17,9 +16,8 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/api
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/web_api
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/config
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/aes_encrypt
-INC_DIRS +=$(asdrive_MAIN)/openssl/include
+INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/relayd/client
 
-#asdrive_SRC_DIR = $(asdrive_MAIN)
 #asdrive_SRC_FILES += $(asdrive_MAIN)/asdJson.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/asdUART.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/asdResponse.o
@@ -37,8 +35,8 @@ INC_DIRS +=$(asdrive_MAIN)/openssl/include
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_session.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_linear_buf.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_io.o
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_config.o
-asdrive_EXTRA_SRC_FILES+=$(asdrive_MAIN)/SocketToRelay/linkd/linkd.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_file.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/base64.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/network/network_link.o
@@ -51,10 +49,11 @@ asdrive_EXTRA_SRC_FILES+=$(asdrive_MAIN)/SocketToRelay/linkd/linkd.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/web_api.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/log_control/log_control.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/ssl/ssl_connect.o
-#asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/aes_encrypt/aes_encrypt.o
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/aes_encrypt/aes_encrypt.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/api/out_api.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/start_link.o
 
+asdrive_INC_DIR=$(asdrive_MAIN)/SocketToRelay/relayd/client
 asdrive_CFLAGS += -D__ESP8266__ $(CFLAGS)
 
 $(eval $(call component_compile_rules,asdrive))
