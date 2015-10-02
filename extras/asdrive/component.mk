@@ -27,7 +27,7 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/relayd/client
 #asdrive_SRC_FILES += $(asdrive_MAIN)/json.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/buf.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/rs232.o
-#asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/config/config.o
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/config/config.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/ev/ev_action.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/ev/ev_init.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/http_parser/http_parser.o
@@ -38,7 +38,7 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/relayd/client
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_config.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_file.o
-#asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/base64.o
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/base64.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/network/network_link.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/relayd/client/rly_client.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/relayd/client/rly_ctrl.o
@@ -47,13 +47,12 @@ asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/system/array.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/system/system_utility.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/web_api.o
-#asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/log_control/log_control.o
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/log_control/log_control.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/ssl/ssl_connect.o
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/aes_encrypt/aes_encrypt.c
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/api/out_api.o
 #asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/start_link.o
 
-asdrive_INC_DIR=$(asdrive_MAIN)/SocketToRelay/relayd/client
-asdrive_CFLAGS += -D__ESP8266__ $(CFLAGS)
+asdrive_CFLAGS += -D__ESP8266__ -DNO_shm $(CFLAGS)
 
 $(eval $(call component_compile_rules,asdrive))
