@@ -8,6 +8,8 @@
 #include "espressif/sdk_private.h"
 
 #include <string.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -19,7 +21,6 @@
 #include "lwip/dns.h"
 
 #include "ssid_config.h"
-
 
 #include "linkd.h"
 
@@ -132,7 +133,7 @@ void user_init(void)
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
-    Linkd_initLinkd(0);
+//    Linkd_initLinkd(0);
 
     xTaskCreate(&http_get_task, (signed char *)"get_task", 256, NULL, 2, NULL);
 }
