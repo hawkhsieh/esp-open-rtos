@@ -19,6 +19,8 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/web_api
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/config
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/aes_encrypt
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/relayd/client
+INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/soc/esp8266
+
 
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdJson.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdUART.c
@@ -44,7 +46,7 @@ asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/network/network_link.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/relayd/client/rly_client.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/relayd/client/rly_ctrl.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/string_utility/string_utility.c
-asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/system/allocMonitor.c
+#asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/system/allocMonitor.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/system/array.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/web_api.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/log_control/log_control.c
@@ -52,7 +54,11 @@ asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/ssl/ssl_connect.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/aes_encrypt/aes_encrypt.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/api/out_api.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/web_api/start_link.c
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/soc/esp8266/asdrive_esp8266.c
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/soc/esp8266/syslog.c
 
-asdrive_CFLAGS += -D__ESP8266__ -DNO_shm $(CFLAGS) 
+
+
+asdrive_CFLAGS += -D__ESP8266__ -DNO_shm $(CFLAGS)
 
 $(eval $(call component_compile_rules,asdrive))

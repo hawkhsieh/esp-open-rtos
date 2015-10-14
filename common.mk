@@ -29,7 +29,7 @@ ROOT := $(dir $(lastword $(MAKEFILE_LIST)))
 
 # Flash size in megabits
 # Valid values are same as for esptool.py - 2,4,8,16,32
-FLASH_SIZE ?= 16
+FLASH_SIZE ?= 32
 
 # Flash mode, valid values are same as for esptool.py - qio,qout,dio.dout
 FLASH_MODE ?= qio
@@ -238,9 +238,9 @@ $(1)_DEFAULT_ROOT := $(dir $(lastword $(MAKEFILE_LIST)))
 $(1)_ROOT ?= $$($(1)_DEFAULT_ROOT)
 $(1)_OBJ_DIR   = $(call lc,$(BUILD_DIR)$(1)/)
 ### determine source files and object files ###
-$(1)_SRC_FILES ?= $$(foreach sdir,$$($(1)_SRC_DIR), 				\
-			$$(wildcard $$(sdir)/*.c) $$(wildcard $$(sdir)/*.S) 	\
-			$$(wildcard $$(sdir)/*.cpp)) 				\
+$(1)_SRC_FILES ?= $$(foreach sdir,$$($(1)_SRC_DIR),					\
+			$$(wildcard $$(sdir)/*.c) $$(wildcard $$(sdir)/*.S)		\
+			$$(wildcard $$(sdir)/*.cpp))				\
 			$$($(1)_EXTRA_SRC_FILES)
 $(1)_REAL_SRC_FILES = $$(foreach sfile,$$($(1)_SRC_FILES),$$(realpath $$(sfile)))
 $(1)_REAL_ROOT = $$(realpath $$($(1)_ROOT))
@@ -328,9 +328,9 @@ $(eval $(call component_compile_rules,PROGRAM))
 ##
 ## if component directory exists relative to $(ROOT), use that.
 ## otherwise try to resolve it as an absolute path
-$(foreach component,$(COMPONENTS), 					\
+$(foreach component,$(COMPONENTS),					\
 	$(if $(wildcard $(ROOT)$(component)),				\
-		$(eval include $(ROOT)$(component)/component.mk), 	\
+		$(eval include $(ROOT)$(component)/component.mk),	\
 		$(eval include $(component)/component.mk)		\
 	)								\
 )

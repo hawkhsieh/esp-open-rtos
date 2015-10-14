@@ -23,8 +23,9 @@
 #include "ssid_config.h"
 
 #include "linkd.h"
+#include "syslog.h"
 
-
+#if 0
 
 #define WEB_SERVER "chainxor.org"
 #define WEB_PORT 80
@@ -118,9 +119,11 @@ void http_get_task(void *pvParameters)
         printf("\r\nStarting again!\r\n");
     }
 }
-
+#endif
 void user_init(void)
 {
+    SyslogDial("54.169.15.38",514);
+
     sdk_uart_div_modify(0, UART_CLK_FREQ / 115200);
     printf("SDK version:%s\n", sdk_system_get_sdk_version());
 
@@ -133,8 +136,8 @@ void user_init(void)
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
-//    Linkd_initLinkd(0);
+    Linkd_initLinkd(0);
 
-    xTaskCreate(&http_get_task, (signed char *)"get_task", 256, NULL, 2, NULL);
+    //xTaskCreate(&http_get_task, (signed char *)"get_task", 256, NULL, 2, NULL);
 }
 

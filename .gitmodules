@@ -1,6 +1,6 @@
 [submodule "lwip/lwip"]
-	path = lwip/lwip
-	url = git@github.com:hawkhsieh/esp-lwip.git
+    path = lwip/lwip
+    url = git@github.com:hawkhsieh/esp-lwip.git
 [submodule "extras/mbedtls/mbedtls"]
-	path = extras/mbedtls/mbedtls
-	url = https://github.com/ARMmbed/mbedtls.git
+    path = extras/mbedtls/mbedtls
+    url = https://github.com/hawkhsieh/mbedtls.git
