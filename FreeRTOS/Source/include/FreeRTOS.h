@@ -354,7 +354,7 @@ typedef portBASE_TYPE (*pdTASK_HOOK_CODE)( void * );
 #endif
 
 #ifndef configCHECK_FOR_STACK_OVERFLOW
-	#define configCHECK_FOR_STACK_OVERFLOW 0
+    #define configCHECK_FOR_STACK_OVERFLOW 1
 #endif
 
 /* The following event macros are embedded in the kernel API calls. */

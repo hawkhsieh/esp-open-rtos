@@ -8,7 +8,7 @@ lwip_INC_DIR =  # all in INC_DIRS, needed for normal operation
 lwip_SRC_DIR = $(lwip_ROOT) $(LWIP_DIR)api $(LWIP_DIR)core $(LWIP_DIR)core/ipv4 $(LWIP_DIR)netif
 
 # LWIP 1.4.1 generates a single warning so we need to disable -Werror when building it
-lwip_CFLAGS = $(CFLAGS) -Wno-address
+lwip_CFLAGS = $(CFLAGS) -Wno-address -DERRNO
 
 $(eval $(call component_compile_rules,lwip))
 
