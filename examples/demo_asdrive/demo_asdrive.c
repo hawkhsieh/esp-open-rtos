@@ -62,6 +62,7 @@
 #define STACK_REQUEST_HEADER_BUF 512
 #define AES_IN_DATA_BUF_MAX 256
 #define BIND_AGENT_BODY_LEN 512
+#define HTTP_REQUEST_MAXLEN 1024
 
 /* Root cert for howsmyssl.com, stored in cert.c */
 extern const char *server_root_cert;
@@ -99,46 +100,15 @@ static void my_debug(void *ctx, int level,
 }
 #endif
 
-static const char *agent_bind_header="POST /agent/bind HTTP/1.1\r\nHost: api.dch.dlink.com\r\nConnection: keep-alive\r\nContent-Length: %d\r\n\r\n%s";
 xTaskHandle xHandle;
 
 static mbedtls_aes_context aes_enc_key_g,aes_dec_key_g;
 
-
-
-typedef struct
-{
-    char brand[24];
-    char model[24];
-    char domainname[128];
-    char firmware_ver[32];
-    char hardware_ver[32];
-    char second_id[64];
-    char mac[32];
-    char country_code[8];
-    char agent_version[8];
-    char base64_did[128];
-    char base64_key[128];
-    char did[128];
-    char key[128];
-}DeviceInfo_st;
-
-static DeviceInfo_st device_info_g = {
-    .brand = "D-LINK",
-    .model = "DSP-W110",
+/*
     .domainname="dch.dlink.com:443",
-    .firmware_ver="1.11",
-    .hardware_ver="A1",
-    .second_id="57b671c4158153a1110c32cf69653112",
-    .mac="02:42:ac:11:00:3c",
     .country_code="WW",
     .agent_version="",
-    .base64_did="YjdlMTVhMDA2ZWE0MmM0MjQ2NDg2ODYzYTk2YTU1ODk=",
-    .base64_key="OGI1N2U1MTgxZDRhZjJjOA==",
-    .did="b7e15a006ea42c4246486863a96a5589",
-    .key="8b57e5181d4af2c8"
-};
-
+*/
 
 
 static int AES_initAES(char *key)
@@ -314,7 +284,7 @@ static char* Http_urlEncode (unsigned char *str)
         if (isalnum(*pstr) || *pstr == '-' || *pstr == '_' || *pstr == '.' || *pstr == '~'){
             pbuf[i++] = *pstr;
         }else{
-            pbuf[i++]='\%';
+            pbuf[i++]='%';
             pbuf[i++] = toHex(*pstr >> 4);
             pbuf[i++] = toHex(*pstr & 15);
         }
@@ -326,22 +296,40 @@ static char* Http_urlEncode (unsigned char *str)
     return (char*)buf;
 }
 
+
+void printHunk( char *data , int data_size , int chunk_size)
+{
+    int last=0;
+    int cutat=chunk_size;
+    while( data_size>cutat ){
+        char tmp;
+        tmp=data[cutat];
+        data[cutat]=0;
+        printf("%s",&data[last]);
+        data[cutat]=tmp;
+        last = cutat;
+        cutat += chunk_size;
+    }
+    printf("%s\n+++total=%d+++\n",&data[last],data_size);
+}
+
 static int getBingAgentBody(char *body,int body_len)
 {
     int len = 0,buf_len = 0, did_len = 0;
     char *iv = NULL,*url_encode_iv = NULL,*p = NULL;
     char *did,*mac,*brand,*model,*fw_ver,*hw_ver,*second_id;
-    time_t time_stamp=1445524568;
+    time_t time_stamp=1445586574;
     unsigned char base64_iv[32],*encrypt_p = NULL;
     char *buf = malloc( BIND_AGENT_BODY_LEN );
 
-    did = device_info_g.did;
-    mac = device_info_g.mac;
-    brand = device_info_g.brand;
-    model = device_info_g.model;
-    fw_ver = device_info_g.firmware_ver;
-    hw_ver = device_info_g.hardware_ver;
-    second_id = device_info_g.second_id;
+
+    did = "b7e15a006ea42c4246486863a96a5589";
+    mac = "02:42:ac:11:00:3c";
+    brand = "D-Link";
+    model = "DSP-W110";
+    fw_ver = "1.11";
+    hw_ver = "A1";
+    second_id = "57b671c4158153a1110c32cf69653112";
 
   //  time_stamp = time(NULL);
 
@@ -376,11 +364,12 @@ static int getBingAgentBody(char *body,int body_len)
 
     }
 
+    logprintf("++++body++++\n");
+    printHunk( buf , buf_len , LOGBUF_LENGTH );
+
     encrypt_p = (unsigned char*)AES_runAESEnc(buf, buf_len, iv);
     free(buf);
     free(iv);
-
-    logprintf("encrypt_p=%s\n",encrypt_p);
 
     p = Http_urlEncode(encrypt_p);
 
@@ -397,25 +386,24 @@ static int getBingAgentBody(char *body,int body_len)
 
 }
 
+
 void http_get_task(void *param)
 {
-    char * restrict request = malloc(512);
+    char * restrict request = malloc(HTTP_REQUEST_MAXLEN);
 
-    char *private_key;
-    private_key = device_info_g.key;
-    AES_initAES(private_key);
+    AES_initAES("8b57e5181d4af2c8");
 
-    logprintf("key=%s\n",private_key);
 #if 1
     char *body = malloc(512);
     int body_len=getBingAgentBody(body,512);
-    int request_len=sprintf( request , agent_bind_header , body_len , body );
+    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN , "POST /agent/bind HTTP/1.1\r\nHost: api.dch.dlink.com:443\r\nContent-Type: application/x-www-form-urlencoded\r\nConnection: close\r\nContent-Length: %d\r\n\r\n%s" , body_len , body );
+    logprintf("request_len=%d\n",request_len);
+
     free(body);
 #else
     strcpy(request,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
     int request_len=strlen(request);
 #endif
-
 
     int successes = 0, failures = 0, ret;
     logprintf("HTTP get task starting...\n");
@@ -590,7 +578,8 @@ void http_get_task(void *param)
             }
         }
 
-        logprintf(" %d bytes written\n\n%s", ret, (char *) request);
+        logprintf("++++request(%d bytes written)++++\n",ret);
+        printHunk( (char*)request , ret , LOGBUF_LENGTH );
 
         /*
          * 7. Read the HTTP response
@@ -648,12 +637,14 @@ void http_get_task(void *param)
         }
 
         logprintf("\n\nsuccesses = %d failures = %d\n", successes, failures);
+#if 0
         int countdown;
         for(countdown = successes ? 3 : 1; countdown >= 0; countdown--) {
             logprintf("%d... ", countdown);
             vTaskDelay(1000 / portTICK_RATE_MS);
         }
         logprintf("\nStarting again!\n");
+#endif
     }
 }
 
