@@ -35,6 +35,15 @@ typedef struct{
                             printf( "(%s:%d): "fmt ,strrchr(__FILE__,'/') , __LINE__, ##args ); \
                         } while(0)
 
+#define halt( fmt , args... ) \
+            do {\
+                            char logbuf[LOGBUF_LENGTH];\
+                            snprintf( logbuf,sizeof(logbuf),"(%s:%d): "fmt, strrchr(__FILE__,'/') , __LINE__,##args);\
+                            SyslogSend( logbuf , strlen(logbuf) ); \
+                            printf( "[HALT] (%s:%d): "fmt ,strrchr(__FILE__,'/') , __LINE__, ##args ); \
+                            while(1);\
+                        } while(0)
+
 #define errnologprintf( fmt, args... ) \
     do {\
         int backuped_errno=errno;\

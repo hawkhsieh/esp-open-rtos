@@ -47,6 +47,7 @@
 #include "mbedtls/base64.h"
 #include <ctype.h>
 #include "stdio.h"
+#include "math.h"
 #define AES_BLOCK_SIZE 16
 
 
@@ -59,10 +60,10 @@
 #define MAX_MIII_LOG_BUF  256 //512byte
 #define MAX_CONFIG_STR_SIZE 512
 #define LINEAR_DEFAULT_BUF_LEN 512   //On Heap
-#define STACK_REQUEST_HEADER_BUF 512
-#define AES_IN_DATA_BUF_MAX 256
+//#define STACK_REQUEST_HEADER_BUF 512
+//#define AES_IN_DATA_BUF_MAX 256
 #define BIND_AGENT_BODY_LEN 512
-#define HTTP_REQUEST_MAXLEN 1024
+#define HTTP_REQUEST_MAXLEN 600
 
 /* Root cert for howsmyssl.com, stored in cert.c */
 extern const char *server_root_cert;
@@ -102,8 +103,29 @@ static void my_debug(void *ctx, int level,
 
 xTaskHandle xHandle;
 
-static mbedtls_aes_context aes_enc_key_g,aes_dec_key_g;
 
+void printHunk( char *data , int data_size , int chunk_size)
+{
+    int last=0;
+    int cutat=chunk_size;
+    while( data_size>cutat ){
+        char tmp;
+        tmp=data[cutat];
+        if (cutat>=data_size)
+            halt("printHunk: last(%d)>=data_size(%d)\n",last,data_size);
+        data[cutat]=0;
+        if (last>=data_size)
+            halt("printHunk: last(%d)>=data_size(%d)\n",last,data_size);
+        printf("%s",&data[last]);
+        data[cutat]=tmp;
+        last = cutat;
+        cutat += chunk_size;
+    }
+    printf("%s\n+++total=%d+++\n",&data[last],data_size);
+}
+
+#define SECUIRTY_REQ
+#if defined (SECUIRTY_REQ)
 /*
     .domainname="dch.dlink.com:443",
     .country_code="WW",
@@ -111,22 +133,24 @@ static mbedtls_aes_context aes_enc_key_g,aes_dec_key_g;
 */
 
 
-static int AES_initAES(char *key)
+static int AES_initAES(char *key , mbedtls_aes_context *ctx , int mode )
 {
     int aes_key_bit,key_len;
     key_len = strlen(key);
     aes_key_bit = key_len*8;
 
-    if (mbedtls_aes_setkey_enc(&aes_enc_key_g, (unsigned char*)key, aes_key_bit) < 0) {
+    if ( mode == MBEDTLS_AES_ENCRYPT){
+        if (mbedtls_aes_setkey_enc(ctx, (unsigned char*)key, aes_key_bit) < 0) {
 
-        logprintf("AES enc init fail \n");
-        goto ERROR;
-    }
+            logprintf("AES enc init fail \n");
+            goto ERROR;
+        }
+    }else{
+        if (mbedtls_aes_setkey_dec(ctx, (unsigned char*)key, aes_key_bit) < 0) {
 
-    if (mbedtls_aes_setkey_dec(&aes_dec_key_g, (unsigned char*)key, aes_key_bit) < 0) {
-
-        logprintf("AES enc init fail \n");
-        goto ERROR;
+            logprintf("AES enc init fail \n");
+            goto ERROR;
+        }
     }
     return 0;
 ERROR:
@@ -135,7 +159,7 @@ ERROR:
 
 static char* llocAESBuf(size_t in_size,size_t *out_size)
 {
-    int remain_size;
+    size_t remain_size;
     char *out_addr;
 
     *out_size = in_size;
@@ -152,8 +176,8 @@ static char* llocAESBuf(size_t in_size,size_t *out_size)
         }
     }
 
-    out_addr = malloc(*out_size+1);
-    bzero(out_addr, *out_size+1);
+    out_addr = malloc((*out_size)+1);
+    bzero(out_addr, (*out_size)+1);
 
     logprintf("AES in size %d out_size %d \n", in_size, *out_size);
 
@@ -165,7 +189,7 @@ typedef struct
 {
     char *data_point;
     int data_length;
-    int alloc_size;
+    size_t alloc_size;
 }aes_data_st;
 
 aes_data_st runAESEncrypt(char *in_addr,size_t in_size,char *iv,int mode)
@@ -173,31 +197,22 @@ aes_data_st runAESEncrypt(char *in_addr,size_t in_size,char *iv,int mode)
     size_t out_size;
     char *out_addr;
     aes_data_st aes_data;
-    char align_in_addr[AES_IN_DATA_BUF_MAX];
+    bzero(&aes_data,sizeof(aes_data_st));
+    char *align_in_addr = malloc(in_size);
 
-    if (in_size > AES_IN_DATA_BUF_MAX) {
-
-       logprintf("AES of in size %d over the in data buf:%d \n", in_size, AES_IN_DATA_BUF_MAX);
-    }
-
-    bzero(align_in_addr, AES_IN_DATA_BUF_MAX);
+    bzero(align_in_addr, in_size);
     memcpy(align_in_addr, in_addr, in_size);
 
     out_addr = llocAESBuf(in_size, &out_size);
 
+    mbedtls_aes_context aes_key;
+    AES_initAES( "8b57e5181d4af2c8" , &aes_key , mode);
 
-    bzero(out_addr,out_size);
-
-    mbedtls_aes_context *aes_key;
-    if (mode == MBEDTLS_AES_ENCRYPT)
-        aes_key = &aes_enc_key_g;
-    else
-        aes_key = &aes_dec_key_g;
     unsigned char const_iv[16];
 
     memcpy(const_iv,iv,16);
     int ret;
-    ret = mbedtls_aes_crypt_cbc( aes_key ,mode ,out_size,(unsigned char *)const_iv,(unsigned char *)align_in_addr,(unsigned char *)out_addr );
+    ret = mbedtls_aes_crypt_cbc( &aes_key ,mode ,out_size,(unsigned char *)const_iv,(unsigned char *)align_in_addr,(unsigned char *)out_addr );
     if (ret)
         logprintf("[ERROR] mbedtls_aes_crypt_cbc failed=%d\n",ret);
 
@@ -205,37 +220,43 @@ aes_data_st runAESEncrypt(char *in_addr,size_t in_size,char *iv,int mode)
     aes_data.data_length = out_size;
     aes_data.alloc_size = out_size;
 
+    free(align_in_addr);
     return aes_data;
 }
 
-static int base64encode(const unsigned char *input, int input_length, unsigned char *output, int output_length)
+static size_t base64encode(const unsigned char *input, size_t input_length, unsigned char *output, size_t output_length)
 {
     size_t written_len;
     int ret;
     ret = mbedtls_base64_encode( output, output_length , &written_len , input , input_length );
     if (ret)
         logprintf("[ERROR] mbedtls_base64_encode failed ret=%d,written_len=%d\n",ret,written_len);
+
+    if ( written_len > output_length )
+        halt( "base64encode: written_len(%d) > output_length(%d)\n" ,written_len , output_length);
+
     return written_len;
 }
-
 
 static char* AES_runAESEnc(char *in_addr,size_t in_size,char *iv)
 {
     aes_data_st aes_data;
-    char base64_enc_text[STACK_REQUEST_HEADER_BUF];
-
-    logprintf("AES encrypt but length:%d and iv:%s \n", in_size, iv);
-
-    if (in_size > STACK_REQUEST_HEADER_BUF)
-        logprintf("in size %d over the in data buf\n", in_size);
-
     aes_data = runAESEncrypt(in_addr, in_size, iv, MBEDTLS_AES_ENCRYPT);
 
-    base64encode((unsigned char*) aes_data.data_point, aes_data.alloc_size, (unsigned char*) base64_enc_text, sizeof(base64_enc_text));
+    int base64_enc_text_size=(int)((double)aes_data.alloc_size * 1.5 )+1;
+    char *base64_enc_text = malloc( base64_enc_text_size );
+    bzero(base64_enc_text,base64_enc_text_size);
+    logprintf("AES encrypt but length:%d and iv:%s \n", in_size, iv);
 
+    base64encode((unsigned char*) aes_data.data_point, aes_data.alloc_size, (unsigned char*) base64_enc_text, base64_enc_text_size );
+
+    if ( base64_enc_text[base64_enc_text_size-1] != 0 )
+    {
+        halt("base64_enc_text[%d] not 0\n" , base64_enc_text_size-1);
+    }
     free(aes_data.data_point);
 
-    return strdup(base64_enc_text);
+    return base64_enc_text;
 }
 
 
@@ -254,21 +275,6 @@ char* Aes_getRandIv(int iv_len)
 }
 
 
-int Network_getInBoundIp(int in_bound_fd,char *ip,int *port)
-{
-    struct sockaddr_in sin;
-    socklen_t len = sizeof(sin);
-    if (getpeername(in_bound_fd, (struct sockaddr *)&sin, &len) == -1)
-        errnologprintf( "FD :%d\n",in_bound_fd);
-    else
-    {
-        strcpy( ip , inet_ntoa(sin.sin_addr) );
-        *port = sin.sin_port;
-        return 0;
-    }
-
-    return -1;
-}
 
 char toHex(char code)
 {
@@ -278,7 +284,8 @@ char toHex(char code)
 
 static char* Http_urlEncode (unsigned char *str)
 {
-    unsigned char *pstr = str, *buf = malloc(strlen((char *)str) * 3 + 1 ), *pbuf = buf;
+    int buf_len=strlen((char *)str) * 3 + 1;
+    unsigned char *pstr = str, *buf = malloc( buf_len ), *pbuf = buf;
     int i=0;
     while (*pstr) {
         if (isalnum(*pstr) || *pstr == '-' || *pstr == '_' || *pstr == '.' || *pstr == '~'){
@@ -291,27 +298,14 @@ static char* Http_urlEncode (unsigned char *str)
         pstr++;
 
     }
+    if ( i >= buf_len )
+        halt( "Http_urlEncode overflow i=%d,buf_len=%d\n", i , buf_len );
+
     pbuf[i] = '\0';
 
     return (char*)buf;
 }
 
-
-void printHunk( char *data , int data_size , int chunk_size)
-{
-    int last=0;
-    int cutat=chunk_size;
-    while( data_size>cutat ){
-        char tmp;
-        tmp=data[cutat];
-        data[cutat]=0;
-        printf("%s",&data[last]);
-        data[cutat]=tmp;
-        last = cutat;
-        cutat += chunk_size;
-    }
-    printf("%s\n+++total=%d+++\n",&data[last],data_size);
-}
 
 static int getBingAgentBody(char *body,int body_len)
 {
@@ -364,12 +358,19 @@ static int getBingAgentBody(char *body,int body_len)
 
     }
 
-    logprintf("++++body++++\n");
-    printHunk( buf , buf_len , LOGBUF_LENGTH );
+//    logprintf("++++body++++\n");
+//    printHunk( buf , buf_len , LOGBUF_LENGTH );
 
     encrypt_p = (unsigned char*)AES_runAESEnc(buf, buf_len, iv);
     free(buf);
     free(iv);
+
+    logprintf("++++base64 p++++\n");
+    printHunk( (char *)encrypt_p , strlen((char *)encrypt_p) , LOGBUF_LENGTH );
+
+    logprintf("++++base64 url_encode_iv++++\n");
+    printHunk( (char *)url_encode_iv , strlen((char *)url_encode_iv) , LOGBUF_LENGTH );
+
 
     p = Http_urlEncode(encrypt_p);
 
@@ -385,26 +386,43 @@ static int getBingAgentBody(char *body,int body_len)
     return len;
 
 }
+#endif
 
+
+int Network_getInBoundIp(int in_bound_fd,char *ip,int *port)
+{
+    struct sockaddr_in sin;
+    socklen_t len = sizeof(sin);
+    if (getpeername(in_bound_fd, (struct sockaddr *)&sin, &len) == -1)
+        errnologprintf( "FD :%d\n",in_bound_fd);
+    else
+    {
+        strncpy( ip , inet_ntoa(sin.sin_addr) , INET_ADDRSTRLEN );
+        *port = sin.sin_port;
+        return 0;
+    }
+
+    return -1;
+}
 
 void http_get_task(void *param)
 {
     char * restrict request = malloc(HTTP_REQUEST_MAXLEN);
-
-    AES_initAES("8b57e5181d4af2c8");
-
-#if 1
+#if defined(SECUIRTY_REQ)
     char *body = malloc(512);
     int body_len=getBingAgentBody(body,512);
-    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN , "POST /agent/bind HTTP/1.1\r\nHost: api.dch.dlink.com:443\r\nContent-Type: application/x-www-form-urlencoded\r\nConnection: close\r\nContent-Length: %d\r\n\r\n%s" , body_len , body );
-    logprintf("request_len=%d\n",request_len);
-
+    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN ,
+    "POST /agent/bind HTTP/1.1\r\n"\
+    "Host: api.dch.dlink.com:443\r\n"\
+    "Content-Type: application/x-www-form-urlencoded\r\n"\
+    "Content-Length: %d\r\n\r\n%s" , body_len , body );
     free(body);
+
+    logprintf("request_len=%d\n",request_len);
 #else
     strcpy(request,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
     int request_len=strlen(request);
 #endif
-
     int successes = 0, failures = 0, ret;
     logprintf("HTTP get task starting...\n");
 
@@ -563,12 +581,12 @@ void http_get_task(void *param)
          * 3. Write the GET request
          */
         logprintf("  > Write to server:\n");
-
+#if 0
         char ip[INET_ADDRSTRLEN];
         int port;
         Network_getInBoundIp( server_fd.fd , ip , &port);
         logprintf("connect to %s:%d\n",ip,port);
-
+#endif
         while((ret = mbedtls_ssl_write(&ssl, (const unsigned char *)request, request_len)) <= 0)
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
@@ -578,8 +596,8 @@ void http_get_task(void *param)
             }
         }
 
-        logprintf("++++request(%d bytes written)++++\n",ret);
-        printHunk( (char*)request , ret , LOGBUF_LENGTH );
+//        logprintf("++++request(%d bytes written)++++\n",ret);
+//        printHunk( (char*)request , ret , LOGBUF_LENGTH );
 
         /*
          * 7. Read the HTTP response
@@ -615,7 +633,8 @@ void http_get_task(void *param)
             }
 
             len = ret;
-            logprintf(" %d bytes read\n\n%s", len, (char *) buf);
+            logprintf("++++request(%d bytes read)++++\n",len);
+            printHunk( (char*)buf , len , LOGBUF_LENGTH );
 
             ret=0;break;
         } while(1);
@@ -636,7 +655,7 @@ void http_get_task(void *param)
             successes++;
         }
 
-        logprintf("\n\nsuccesses = %d failures = %d\n", successes, failures);
+        logprintf("successes = %d failures = %d\n", successes, failures);
 #if 0
         int countdown;
         for(countdown = successes ? 3 : 1; countdown >= 0; countdown--) {
@@ -664,5 +683,5 @@ void user_init(void)
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
-    xTaskCreate(&http_get_task, (signed char *)"get_task", 1500,  NULL , 2, &xHandle );
+    xTaskCreate(&http_get_task, (signed char *)"get_task", 2048 ,  NULL , 2, &xHandle );
 }
