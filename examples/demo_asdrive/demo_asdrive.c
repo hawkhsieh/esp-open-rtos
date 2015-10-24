@@ -43,27 +43,13 @@
 
 
 #include "syslog.h"
-#include <mbedtls/aes.h>
-#include "mbedtls/base64.h"
-#include <ctype.h>
-#include "stdio.h"
-#include "math.h"
+#include "start_link.h"
+#include "memory.h"
 #define AES_BLOCK_SIZE 16
 
 
 #define WEB_SERVER "api.dch.dlink.com"
 #define WEB_PORT "443"
-
-
-#define MAX_SESSION_NUM 1
-#define FUNCTION_NAME_LEN 16
-#define MAX_MIII_LOG_BUF  256 //512byte
-#define MAX_CONFIG_STR_SIZE 512
-#define LINEAR_DEFAULT_BUF_LEN 512   //On Heap
-//#define STACK_REQUEST_HEADER_BUF 512
-//#define AES_IN_DATA_BUF_MAX 256
-#define BIND_AGENT_BODY_LEN 512
-#define HTTP_REQUEST_MAXLEN 600
 
 /* Root cert for howsmyssl.com, stored in cert.c */
 extern const char *server_root_cert;
@@ -103,308 +89,11 @@ static void my_debug(void *ctx, int level,
 
 xTaskHandle xHandle;
 
-
-void printHunk( char *data , int data_size , int chunk_size)
-{
-    int last=0;
-    int cutat=chunk_size;
-    while( data_size>cutat ){
-        char tmp;
-        tmp=data[cutat];
-        if (cutat>=data_size)
-            halt("printHunk: last(%d)>=data_size(%d)\n",last,data_size);
-        data[cutat]=0;
-        if (last>=data_size)
-            halt("printHunk: last(%d)>=data_size(%d)\n",last,data_size);
-        printf("%s",&data[last]);
-        data[cutat]=tmp;
-        last = cutat;
-        cutat += chunk_size;
-    }
-    printf("%s\n+++total=%d+++\n",&data[last],data_size);
-}
-
-#define SECUIRTY_REQ
-#if defined (SECUIRTY_REQ)
 /*
     .domainname="dch.dlink.com:443",
     .country_code="WW",
     .agent_version="",
 */
-
-
-static int AES_initAES(char *key , mbedtls_aes_context *ctx , int mode )
-{
-    int aes_key_bit,key_len;
-    key_len = strlen(key);
-    aes_key_bit = key_len*8;
-
-    if ( mode == MBEDTLS_AES_ENCRYPT){
-        if (mbedtls_aes_setkey_enc(ctx, (unsigned char*)key, aes_key_bit) < 0) {
-
-            logprintf("AES enc init fail \n");
-            goto ERROR;
-        }
-    }else{
-        if (mbedtls_aes_setkey_dec(ctx, (unsigned char*)key, aes_key_bit) < 0) {
-
-            logprintf("AES enc init fail \n");
-            goto ERROR;
-        }
-    }
-    return 0;
-ERROR:
-    return -1;
-}
-
-static char* llocAESBuf(size_t in_size,size_t *out_size)
-{
-    size_t remain_size;
-    char *out_addr;
-
-    *out_size = in_size;
-    remain_size = in_size % AES_BLOCK_SIZE;
-
-    if (remain_size != 0){
-
-        if (in_size < AES_BLOCK_SIZE)
-            *out_size = AES_BLOCK_SIZE;
-        else {
-
-            int add_size = AES_BLOCK_SIZE - remain_size;
-            *out_size += add_size;
-        }
-    }
-
-    out_addr = malloc((*out_size)+1);
-    bzero(out_addr, (*out_size)+1);
-
-    logprintf("AES in size %d out_size %d \n", in_size, *out_size);
-
-    return out_addr;
-
-}
-
-typedef struct
-{
-    char *data_point;
-    int data_length;
-    size_t alloc_size;
-}aes_data_st;
-
-aes_data_st runAESEncrypt(char *in_addr,size_t in_size,char *iv,int mode)
-{
-    size_t out_size;
-    char *out_addr;
-    aes_data_st aes_data;
-    bzero(&aes_data,sizeof(aes_data_st));
-    char *align_in_addr = malloc(in_size);
-
-    bzero(align_in_addr, in_size);
-    memcpy(align_in_addr, in_addr, in_size);
-
-    out_addr = llocAESBuf(in_size, &out_size);
-
-    mbedtls_aes_context aes_key;
-    AES_initAES( "8b57e5181d4af2c8" , &aes_key , mode);
-
-    unsigned char const_iv[16];
-
-    memcpy(const_iv,iv,16);
-    int ret;
-    ret = mbedtls_aes_crypt_cbc( &aes_key ,mode ,out_size,(unsigned char *)const_iv,(unsigned char *)align_in_addr,(unsigned char *)out_addr );
-    if (ret)
-        logprintf("[ERROR] mbedtls_aes_crypt_cbc failed=%d\n",ret);
-
-    aes_data.data_point = out_addr;
-    aes_data.data_length = out_size;
-    aes_data.alloc_size = out_size;
-
-    free(align_in_addr);
-    return aes_data;
-}
-
-static size_t base64encode(const unsigned char *input, size_t input_length, unsigned char *output, size_t output_length)
-{
-    size_t written_len;
-    int ret;
-    ret = mbedtls_base64_encode( output, output_length , &written_len , input , input_length );
-    if (ret)
-        logprintf("[ERROR] mbedtls_base64_encode failed ret=%d,written_len=%d\n",ret,written_len);
-
-    if ( written_len > output_length )
-        halt( "base64encode: written_len(%d) > output_length(%d)\n" ,written_len , output_length);
-
-    return written_len;
-}
-
-static char* AES_runAESEnc(char *in_addr,size_t in_size,char *iv)
-{
-    aes_data_st aes_data;
-    aes_data = runAESEncrypt(in_addr, in_size, iv, MBEDTLS_AES_ENCRYPT);
-
-    int base64_enc_text_size=(int)((double)aes_data.alloc_size * 1.5 )+1;
-    char *base64_enc_text = malloc( base64_enc_text_size );
-    bzero(base64_enc_text,base64_enc_text_size);
-    logprintf("AES encrypt but length:%d and iv:%s \n", in_size, iv);
-
-    base64encode((unsigned char*) aes_data.data_point, aes_data.alloc_size, (unsigned char*) base64_enc_text, base64_enc_text_size );
-
-    if ( base64_enc_text[base64_enc_text_size-1] != 0 )
-    {
-        halt("base64_enc_text[%d] not 0\n" , base64_enc_text_size-1);
-    }
-    free(aes_data.data_point);
-
-    return base64_enc_text;
-}
-
-
-char* Aes_getRandIv(int iv_len)
-{
-    int i = 0;
-    char *retval = (char*) malloc(iv_len+1);
-
-    srand((unsigned int)&i);
-    for (i=0; i<iv_len; i++) {
-        retval[i] = (rand() % 255)+1;
-    }
-
-    retval[i] = 0;
-    return retval;
-}
-
-
-
-char toHex(char code)
-{
-    static char hex[] = "0123456789ABCDEF";
-    return hex[code & 15];
-}
-
-static char* Http_urlEncode (unsigned char *str)
-{
-    int buf_len=strlen((char *)str) * 3 + 1;
-    unsigned char *pstr = str, *buf = malloc( buf_len ), *pbuf = buf;
-    int i=0;
-    while (*pstr) {
-        if (isalnum(*pstr) || *pstr == '-' || *pstr == '_' || *pstr == '.' || *pstr == '~'){
-            pbuf[i++] = *pstr;
-        }else{
-            pbuf[i++]='%';
-            pbuf[i++] = toHex(*pstr >> 4);
-            pbuf[i++] = toHex(*pstr & 15);
-        }
-        pstr++;
-
-    }
-    if ( i >= buf_len )
-        halt( "Http_urlEncode overflow i=%d,buf_len=%d\n", i , buf_len );
-
-    pbuf[i] = '\0';
-
-    return (char*)buf;
-}
-
-
-static int getBingAgentBody(char *body,int body_len)
-{
-    int len = 0,buf_len = 0, did_len = 0;
-    char *iv = NULL,*url_encode_iv = NULL,*p = NULL;
-    char *did,*mac,*brand,*model,*fw_ver,*hw_ver,*second_id;
-    time_t time_stamp=1445586574;
-    unsigned char base64_iv[32],*encrypt_p = NULL;
-    char *buf = malloc( BIND_AGENT_BODY_LEN );
-
-
-    did = "b7e15a006ea42c4246486863a96a5589";
-    mac = "02:42:ac:11:00:3c";
-    brand = "D-Link";
-    model = "DSP-W110";
-    fw_ver = "1.11";
-    hw_ver = "A1";
-    second_id = "57b671c4158153a1110c32cf69653112";
-
-  //  time_stamp = time(NULL);
-
-    iv = Aes_getRandIv(16);
-    base64encode((unsigned char*)iv, strlen(iv), base64_iv, sizeof(base64_iv));
-    url_encode_iv = Http_urlEncode(base64_iv);
-
-
-    did_len = strlen(did);
-
-    if (did_len == 0) {
-
-         buf_len = snprintf(buf, BIND_AGENT_BODY_LEN ,
-                 "mac=%s&dch_id=%s&"
-                 "brand=%s&model=%s&"
-                 "firmware_version=%s&"
-                 "hardware_version=%s&"
-                 "agent_version=%s&"
-                 "time=%d", mac, second_id, brand, model, fw_ver, hw_ver, "1.0.17", (int)time_stamp);
-
-    }
-    else {
-
-        buf_len = snprintf(buf, BIND_AGENT_BODY_LEN ,
-                       "did=%s&mac=%s&"
-                       "dch_id=%s&"
-                       "brand=%s&model=%s&"
-                       "firmware_version=%s&"
-                       "hardware_version=%s&"
-                       "agent_version=%s&"
-                       "time=%d", did, mac, second_id, brand, model, fw_ver, hw_ver, "1.0.17", (int)time_stamp);
-
-    }
-
-//    logprintf("++++body++++\n");
-//    printHunk( buf , buf_len , LOGBUF_LENGTH );
-
-    encrypt_p = (unsigned char*)AES_runAESEnc(buf, buf_len, iv);
-    free(buf);
-    free(iv);
-
-    logprintf("++++base64 p++++\n");
-    printHunk( (char *)encrypt_p , strlen((char *)encrypt_p) , LOGBUF_LENGTH );
-
-    logprintf("++++base64 url_encode_iv++++\n");
-    printHunk( (char *)url_encode_iv , strlen((char *)url_encode_iv) , LOGBUF_LENGTH );
-
-
-    p = Http_urlEncode(encrypt_p);
-
-    if (did_len  == 0)
-        len = snprintf(body, body_len, "p=%s&iv=%s\r\n\r\n", p, url_encode_iv);
-    else
-        len = snprintf(body, body_len, "did=%s&p=%s&iv=%s\r\n\r\n", did, p, url_encode_iv);
-
-    free(url_encode_iv);
-    free(encrypt_p);
-    free(p);
-
-    return len;
-
-}
-#endif
-
-
-int Network_getInBoundIp(int in_bound_fd,char *ip,int *port)
-{
-    struct sockaddr_in sin;
-    socklen_t len = sizeof(sin);
-    if (getpeername(in_bound_fd, (struct sockaddr *)&sin, &len) == -1)
-        errnologprintf( "FD :%d\n",in_bound_fd);
-    else
-    {
-        strncpy( ip , inet_ntoa(sin.sin_addr) , INET_ADDRSTRLEN );
-        *port = sin.sin_port;
-        return 0;
-    }
-
-    return -1;
-}
-
 
 typedef struct{
 
@@ -420,7 +109,12 @@ void TLSConnect_Free( TLSConnect *conn , mbedtls_net_context *fd )
 {
     mbedtls_ssl_session_reset(&conn->ssl);
     mbedtls_net_free( fd );
-
+/*
+    mbedtls_x509_crt_free( &conn->cacert );
+    mbedtls_ssl_free( &conn->ssl );
+    mbedtls_ssl_config_free( &conn->conf );
+    mbedtls_ctr_drbg_free( &conn->ctr_drbg );
+    mbedtls_entropy_free( &conn->entropy );*/
 }
 
 int TLSConnect_Init( TLSConnect *conn )
@@ -522,7 +216,7 @@ exit:
 
 int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , char *response , int response_len )
 {
-    int ret=0;
+    int ret=0,len=0;
     logprintf("HTTP get task starting...\n");
 
     uint32_t flags;
@@ -530,7 +224,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
 
 
         mbedtls_net_init(&server_fd);
-        logprintf("heap = %u\n", xPortGetFreeHeapSize());
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
         /*
          * 1. Start the connection
          */
@@ -560,6 +254,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
                 goto exit;
             }
         }
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         logprintf(" ok\n");
 
@@ -581,6 +276,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
         }
         else
             logprintf(" ok\n");
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         /*
          * 3. Write the GET request
@@ -600,6 +296,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
                 goto exit;
             }
         }
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
 //        logprintf("++++request(%d bytes written)++++\n",ret);
 //        printHunk( (char*)request , ret , LOGBUF_LENGTH );
@@ -612,6 +309,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
         do
         {
             ret = mbedtls_ssl_read(&conn->ssl, (unsigned char *)response, response_len );
+            logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
             if(ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
                 continue;
@@ -633,7 +331,9 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
                 break;
             }
 
-            ret=0;break;
+            len = ret;
+            break;
+
         } while(1);
 
         mbedtls_ssl_close_notify(&conn->ssl);
@@ -641,6 +341,13 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
     exit:
 
         TLSConnect_Free( conn , &server_fd );
+
+        if ( ret < 0 ){
+            char error_buf[100];
+            mbedtls_strerror(ret, error_buf, 100);
+            logprintf("\n\nLast error was: %d - %s\n\n", ret, error_buf);
+        }else
+            ret=len;
 
 #if 0
         int countdown;
@@ -663,49 +370,49 @@ void sleep( int second )
 
 void http_get_task(void *param)
 {
-    char * restrict request = malloc(HTTP_REQUEST_MAXLEN);
-#if defined(SECUIRTY_REQ)
-    char *body = malloc(512);
-    int body_len=getBingAgentBody(body,512);
-    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN ,
-    "POST /agent/bind HTTP/1.1\r\n"\
-    "Host: api.dch.dlink.com:443\r\n"\
-    "Content-Type: application/x-www-form-urlencoded\r\n"\
-    "Content-Length: %d\r\n\r\n%s" , body_len , body );
-    free(body);
-
-    logprintf("request_len=%d\n",request_len);
-#else
-    strcpy(request,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
-    int request_len=strlen(request);
-#endif
-
-    unsigned char response[512];
-    memset(response, 0, sizeof(response));
-
+    char *http_buf = malloc(HTTP_REQUEST_MAXLEN);
 
     TLSConnect *conn=malloc(sizeof(TLSConnect));
     int successes = 0, failures = 0;
 
     if ( TLSConnect_Init( conn ) )
-         halt("TLSConnect_Init\n");
+        halt("TLSConnect_Init\n");
+    logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
     while(1){
 
-        int ret;
-        ret = TLSConnect_SendReq( conn , request , request_len , (char *)response , sizeof(response) );
+#if 1
+        char *body = malloc(512);
+        int body_len=getBingAgentBody(body,512);
+        int http_buf_len=snprintf( http_buf , HTTP_REQUEST_MAXLEN ,
+                                  "POST /agent/bind HTTP/1.1\r\n"\
+                                  "Host: api.dch.dlink.com:443\r\n"\
+                                  "Content-Type: application/x-www-form-urlencoded\r\n"\
+                                  "Content-Length: %d\r\n\r\n%s" , body_len , body );
+        free(body);
 
-        if(ret != 0)
-        {
-            char error_buf[100];
-            mbedtls_strerror(ret, error_buf, 100);
-            logprintf("\n\nLast error was: %d - %s\n\n", ret, error_buf);
+        logprintf("request_len=%d\n",http_buf_len);
+#else
+        strcpy(http_buf,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
+        int http_buf_len=strlen(http_buf);
+#endif
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
+
+        int ret;
+        unsigned char response[512];
+        memset(response, 0, sizeof(response));
+        ret = TLSConnect_SendReq( conn , http_buf , http_buf_len , (char *)http_buf , http_buf_len );
+
+        logprintf("heap=%u\n", xPortGetFreeHeapSize());
+
+
+        if(ret <= 0){
             failures++;
         } else {
             successes++;
 
             logprintf("++++request(%d bytes read)++++\n",ret);
-            printHunk( (char*)response , ret , LOGBUF_LENGTH );
+            printHunk( (char*)http_buf , ret , LOGBUF_LENGTH );
         }
 
         logprintf("successes = %d failures = %d\n", successes, failures);
@@ -728,5 +435,5 @@ void user_init(void)
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
-    xTaskCreate(&http_get_task, (signed char *)"get_task", 2048 ,  NULL , 2, &xHandle );
+    xTaskCreate(&http_get_task, (signed char *)"get_task", 1024 ,  NULL , 2, &xHandle );
 }
