@@ -405,49 +405,40 @@ int Network_getInBoundIp(int in_bound_fd,char *ip,int *port)
     return -1;
 }
 
-void http_get_task(void *param)
-{
-    char * restrict request = malloc(HTTP_REQUEST_MAXLEN);
-#if defined(SECUIRTY_REQ)
-    char *body = malloc(512);
-    int body_len=getBingAgentBody(body,512);
-    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN ,
-    "POST /agent/bind HTTP/1.1\r\n"\
-    "Host: api.dch.dlink.com:443\r\n"\
-    "Content-Type: application/x-www-form-urlencoded\r\n"\
-    "Content-Length: %d\r\n\r\n%s" , body_len , body );
-    free(body);
 
-    logprintf("request_len=%d\n",request_len);
-#else
-    strcpy(request,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
-    int request_len=strlen(request);
-#endif
-    int successes = 0, failures = 0, ret;
-    logprintf("HTTP get task starting...\n");
-
-    uint32_t flags;
-    const char *pers = "ssl_client1";
+typedef struct{
 
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_x509_crt cacert;
     mbedtls_ssl_config conf;
-    mbedtls_net_context server_fd;
 
+}TLSConnect;
+
+void TLSConnect_Free( TLSConnect *conn , mbedtls_net_context *fd )
+{
+    mbedtls_ssl_session_reset(&conn->ssl);
+    mbedtls_net_free( fd );
+
+}
+
+int TLSConnect_Init( TLSConnect *conn )
+{
+    const char *pers = "ssl_client1";
+    int ret;
     /*
      * 0. Initialize the RNG and the session data
      */
-    mbedtls_ssl_init(&ssl);
-    mbedtls_x509_crt_init(&cacert);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_ssl_init(&conn->ssl);
+    mbedtls_x509_crt_init(&conn->cacert);
+    mbedtls_ctr_drbg_init(&conn->ctr_drbg);
     logprintf("\n  . Seeding the random number generator...");
 
-    mbedtls_ssl_config_init(&conf);
+    mbedtls_ssl_config_init(&conn->conf);
 
-    mbedtls_entropy_init(&entropy);
-    if((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+    mbedtls_entropy_init(&conn->entropy);
+    if((ret = mbedtls_ctr_drbg_seed(&conn->ctr_drbg, mbedtls_entropy_func, &conn->entropy,
                                     (const unsigned char *) pers,
                                     strlen(pers))) != 0)
     {
@@ -462,7 +453,7 @@ void http_get_task(void *param)
      */
     logprintf("  . Loading the CA root certificate ...");
 
-    ret = mbedtls_x509_crt_parse(&cacert, (uint8_t*)server_root_cert, strlen(server_root_cert)+1);
+    ret = mbedtls_x509_crt_parse(&conn->cacert, (uint8_t*)server_root_cert, strlen(server_root_cert)+1);
     if(ret < 0)
     {
         logprintf(" failed\n  !  mbedtls_x509_crt_parse returned -0x%x\n\n", -ret);
@@ -472,7 +463,7 @@ void http_get_task(void *param)
     logprintf(" ok (%d skipped)\n", ret);
 
     /* Hostname set here should match CN in server certificate */
-    if((ret = mbedtls_ssl_set_hostname(&ssl, WEB_SERVER)) != 0)
+    if((ret = mbedtls_ssl_set_hostname(&conn->ssl, WEB_SERVER)) != 0)
     {
         logprintf(" failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret);
         while(1) {} /* todo: replace with abort() */
@@ -483,7 +474,7 @@ void http_get_task(void *param)
      */
     logprintf("  . Setting up the SSL/TLS structure...");
 
-    if((ret = mbedtls_ssl_config_defaults(&conf,
+    if((ret = mbedtls_ssl_config_defaults(&conn->conf,
                                           MBEDTLS_SSL_IS_CLIENT,
                                           MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0)
@@ -497,15 +488,15 @@ void http_get_task(void *param)
     /* OPTIONAL is not optimal for security, in this example it will print
        a warning if CA verification fails but it will continue to connect.
     */
-    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    mbedtls_ssl_conf_ca_chain(&conf, &cacert, NULL);
-    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    mbedtls_ssl_conf_authmode(&conn->conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
+    mbedtls_ssl_conf_ca_chain(&conn->conf, &conn->cacert, NULL);
+    mbedtls_ssl_conf_rng(&conn->conf, mbedtls_ctr_drbg_random, &conn->ctr_drbg);
 #ifdef MBEDTLS_DEBUG_C
     mbedtls_debug_set_threshold(DEBUG_LEVEL);
-    mbedtls_ssl_conf_dbg(&conf, my_debug, stdout);
+    mbedtls_ssl_conf_dbg(&conn->conf, my_debug, stdout);
 #endif
 
-    if((ret = mbedtls_ssl_setup(&ssl, &conf)) != 0)
+    if((ret = mbedtls_ssl_setup(&conn->ssl, &conn->conf)) != 0)
     {
         logprintf(" failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
         goto exit;
@@ -521,9 +512,23 @@ void http_get_task(void *param)
         vTaskDelay(500 / portTICK_RATE_MS);
         dns_err = netconn_gethostbyname(WEB_SERVER, &host_ip);
     } while(dns_err != ERR_OK);
-    logprintf("done.\n");
+    logprintf("Internet is ok!!\n");
+    return 0;
 
-    while(1) {
+exit:
+    TLSConnect_Free( conn , 0 );
+    return -1;
+}
+
+int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , char *response , int response_len )
+{
+    int ret=0;
+    logprintf("HTTP get task starting...\n");
+
+    uint32_t flags;
+    mbedtls_net_context server_fd;
+
+
         mbedtls_net_init(&server_fd);
         logprintf("heap = %u\n", xPortGetFreeHeapSize());
         /*
@@ -540,14 +545,14 @@ void http_get_task(void *param)
 
         logprintf(" ok\n");
 
-        mbedtls_ssl_set_bio(&ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
+        mbedtls_ssl_set_bio(&conn->ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 
         /*
          * 4. Handshake
          */
         logprintf("  . Performing the SSL/TLS handshake...\n");
 
-        while((ret = mbedtls_ssl_handshake(&ssl)) != 0)
+        while((ret = mbedtls_ssl_handshake(&conn->ssl)) != 0)
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
             {
@@ -564,7 +569,7 @@ void http_get_task(void *param)
         logprintf("  . Verifying peer X.509 certificate...\n");
 
         /* In real life, we probably want to bail out when ret != 0 */
-        if((flags = mbedtls_ssl_get_verify_result(&ssl)) != 0)
+        if((flags = mbedtls_ssl_get_verify_result(&conn->ssl)) != 0)
         {
             char vrfy_buf[512];
 
@@ -587,7 +592,7 @@ void http_get_task(void *param)
         Network_getInBoundIp( server_fd.fd , ip , &port);
         logprintf("connect to %s:%d\n",ip,port);
 #endif
-        while((ret = mbedtls_ssl_write(&ssl, (const unsigned char *)request, request_len)) <= 0)
+        while((ret = mbedtls_ssl_write(&conn->ssl, (const unsigned char *)request, request_len)) <= 0)
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
             {
@@ -606,11 +611,7 @@ void http_get_task(void *param)
 
         do
         {
-            size_t len;
-            unsigned char buf[512];
-            len = sizeof(buf) - 1;
-            memset(buf, 0, sizeof(buf));
-            ret = mbedtls_ssl_read(&ssl, buf, len);
+            ret = mbedtls_ssl_read(&conn->ssl, (unsigned char *)response, response_len );
 
             if(ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
                 continue;
@@ -632,18 +633,67 @@ void http_get_task(void *param)
                 break;
             }
 
-            len = ret;
-            logprintf("++++request(%d bytes read)++++\n",len);
-            printHunk( (char*)buf , len , LOGBUF_LENGTH );
-
             ret=0;break;
         } while(1);
 
-        mbedtls_ssl_close_notify(&ssl);
+        mbedtls_ssl_close_notify(&conn->ssl);
 
     exit:
-        mbedtls_ssl_session_reset(&ssl);
-        mbedtls_net_free(&server_fd);
+
+        TLSConnect_Free( conn , &server_fd );
+
+#if 0
+        int countdown;
+        for(countdown = successes ? 3 : 1; countdown >= 0; countdown--) {
+            logprintf("%d... ", countdown);
+            vTaskDelay(1000 / portTICK_RATE_MS);
+        }
+        logprintf("\nStarting again!\n");
+#endif
+    return ret;
+
+}
+
+void sleep( int second )
+{
+    vTaskDelay( second / portTICK_RATE_MS);
+}
+
+
+
+void http_get_task(void *param)
+{
+    char * restrict request = malloc(HTTP_REQUEST_MAXLEN);
+#if defined(SECUIRTY_REQ)
+    char *body = malloc(512);
+    int body_len=getBingAgentBody(body,512);
+    int request_len=snprintf( request , HTTP_REQUEST_MAXLEN ,
+    "POST /agent/bind HTTP/1.1\r\n"\
+    "Host: api.dch.dlink.com:443\r\n"\
+    "Content-Type: application/x-www-form-urlencoded\r\n"\
+    "Content-Length: %d\r\n\r\n%s" , body_len , body );
+    free(body);
+
+    logprintf("request_len=%d\n",request_len);
+#else
+    strcpy(request,"GET /ok.html HTTP/1.1\r\nHost: api.dch.dlink.com\r\n\r\n");
+    int request_len=strlen(request);
+#endif
+
+    unsigned char response[512];
+    memset(response, 0, sizeof(response));
+
+
+    TLSConnect *conn=malloc(sizeof(TLSConnect));
+    int successes = 0, failures = 0;
+
+    if ( TLSConnect_Init( conn ) )
+         halt("TLSConnect_Init\n");
+
+    while(1){
+
+        int ret;
+        ret = TLSConnect_SendReq( conn , request , request_len , (char *)response , sizeof(response) );
 
         if(ret != 0)
         {
@@ -653,17 +703,12 @@ void http_get_task(void *param)
             failures++;
         } else {
             successes++;
+
+            logprintf("++++request(%d bytes read)++++\n",ret);
+            printHunk( (char*)response , ret , LOGBUF_LENGTH );
         }
 
         logprintf("successes = %d failures = %d\n", successes, failures);
-#if 0
-        int countdown;
-        for(countdown = successes ? 3 : 1; countdown >= 0; countdown--) {
-            logprintf("%d... ", countdown);
-            vTaskDelay(1000 / portTICK_RATE_MS);
-        }
-        logprintf("\nStarting again!\n");
-#endif
     }
 }
 
