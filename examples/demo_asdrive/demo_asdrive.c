@@ -45,6 +45,11 @@
 #include "syslog.h"
 #include "start_link.h"
 #include "memory.h"
+
+//#include "asdJson.h"
+#include "string_utility.h"
+#include "fsm.h"
+
 #define AES_BLOCK_SIZE 16
 
 
@@ -368,20 +373,154 @@ void sleep( int second )
 
 
 
-void http_get_task(void *param)
+String getJson( void *data,size_t len )
 {
-    char *http_buf = malloc(HTTP_REQUEST_MAXLEN);
+    String json_string;
+    bzero(&json_string,sizeof(String));
+    char *json = strchr((char*)data,'{');
+    char *end_json = strrchr((char*)data,'}');
+    if ( end_json ) *(end_json+1)=0;
+    else{
+        goto ERROR;
+    }
+    STRING_LinkString(&json_string , json , strlen(json));
+ERROR:
+    return json_string;
+}
 
-    TLSConnect *conn=malloc(sizeof(TLSConnect));
-    int successes = 0, failures = 0;
+typedef struct
+{
+    char http_buf[HTTP_REQUEST_MAXLEN];
+    TLSConnect conn;
+    FSM fsm;
 
-    if ( TLSConnect_Init( conn ) )
-        halt("TLSConnect_Init\n");
+}Linkd;
+#if JSON
+char *agent_bind_keys[] = { "p","status",0};
+
+typedef struct{
+    char *p;
+    char *status;
+}AgentBind;
+
+int AgentBind_Assign(char **data, void *globol_context , void *local_context )
+{
+    KeyValue *key_value = (KeyValue *)globol_context;
+    AgentBind *agent_bind = (AgentBind*)asdJsonFSM_GetData(data);
+
+    if ( strcmp( key_value->key , "p") == 0 ){
+        agent_bind->p=key_value->value;
+    }else if( strcmp( key_value->key , "status") == 0 ){
+        agent_bind->status = key_value->value;
+    }
+
+    return 0;
+}
+#endif
+
+
+int agent_bind(char **data, void *globol_context , void *local_context )
+{
+    Linkd *linkd_inst=(Linkd *)*data;
+
+    TLSConnect *conn = &linkd_inst->conn;
+    char *http_buf=linkd_inst->http_buf;
+
     logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
+    logprintf( "linkd_inst=%x\n",linkd_inst);
+    logprintf( "%u %u\n",linkd_inst->conn.entropy.accumulator.total[0] ,linkd_inst->conn.entropy.accumulator.total[1]);
+    char *body = malloc(512);
+    int body_len=getBingAgentBody(body,512);
+    int http_buf_len=snprintf( http_buf , HTTP_REQUEST_MAXLEN ,
+                               "POST /agent/bind HTTP/1.1\r\n"\
+                               "Host: api.dch.dlink.com:443\r\n"\
+                               "Content-Type: application/x-www-form-urlencoded\r\n"\
+                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
+    free(body);
+    int ret;
+    ret = TLSConnect_SendReq( conn , http_buf , http_buf_len , (char *)http_buf , http_buf_len );
+
+    if(ret <= 0){
+        halt("agent/bind failed\n");
+    }
+    logprintf("++++request(%d bytes read)++++\n",ret);
+    printHunk( (char*)http_buf , ret , LOGBUF_LENGTH );
+
+#if 0
+    AgentBind agent_bind_json;
+    transition perform_trans={0, FUNCTION(AgentBind_Assign),   1,-1, ACCEPT };
+
+    char *httu_buf_json = getJson( http_buf , ret );
+    if ( httu_buf_json == 0 )
+    asdJsonFSM_Parse( http_buf , &agent_bind_json , &perform_trans , agent_bind_keys );
+
+
+    logprintf("p:%s\n",agent_bind_json.p);
+    logprintf("status:%s\n",agent_bind_json.status);
+#endif
+    return 0;
+}
+
+int get_relay(char **data, void *globol_context , void *local_context )
+{
+    return 0;
+}
+
+
+int rs_connect(char **data, void *globol_context , void *local_context )
+{
+    return 0;
+}
+
+int supervisor(char **data, void *globol_context , void *local_context )
+{
+    return 0;
+}
+
+
+typedef enum{
+    AGENT_BIND,
+    SERIVCE_GET_RELAY,
+    RS_CONNECT,
+    RS_SUPERVISOR
+}LinkdStatus;
+
+transition linkd_transition[] = {
+    {AGENT_BIND, FUNCTION(agent_bind),       AGENT_BIND,AGENT_BIND, ACCEPT },
+    #if 0
+    {AGENT_BIND, FUNCTION(agent_bind),       SERIVCE_GET_RELAY,AGENT_BIND, ACCEPT },
+    {SERIVCE_GET_RELAY, FUNCTION(get_relay), RS_CONNECT       ,AGENT_BIND, ACCEPT },
+    {RS_CONNECT, FUNCTION(rs_connect),       RS_CONNECT       ,SERIVCE_GET_RELAY, ACCEPT },
+    {RS_SUPERVISOR, FUNCTION(supervisor),    RS_SUPERVISOR    ,SERIVCE_GET_RELAY, ACCEPT },
+    #endif
+
+    {-1}
+};
+
+
+
+void http_get_task(void *param)
+{
+    Linkd *linkd_inst;
+    linkd_inst=malloc(sizeof(Linkd));
+    bzero( linkd_inst , sizeof(Linkd) );
+
+    if ( TLSConnect_Init( &linkd_inst->conn ) )
+        halt("TLSConnect_Init\n");
+
+//    linkd_inst->http_buf = malloc(HTTP_REQUEST_MAXLEN);
+//    linkd_inst->conn=malloc(sizeof(TLSConnect));
+
+    run_fsm( &linkd_inst->fsm  , linkd_transition , (char**)&linkd_inst , NULL , NULL, NULL);
+
+
+#if defined TEST
     while(1){
 
 #if 1
+        int successes = 0, failures = 0;
+
         char *body = malloc(512);
         int body_len=getBingAgentBody(body,512);
         int http_buf_len=snprintf( http_buf , HTTP_REQUEST_MAXLEN ,
@@ -399,8 +538,6 @@ void http_get_task(void *param)
         logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         int ret;
-        unsigned char response[512];
-        memset(response, 0, sizeof(response));
         ret = TLSConnect_SendReq( conn , http_buf , http_buf_len , (char *)http_buf , http_buf_len );
 
         logprintf("heap=%u\n", xPortGetFreeHeapSize());
@@ -417,6 +554,7 @@ void http_get_task(void *param)
 
         logprintf("successes = %d failures = %d\n", successes, failures);
     }
+#endif
 }
 
 void user_init(void)
@@ -435,5 +573,5 @@ void user_init(void)
     sdk_wifi_set_opmode(STATION_MODE);
     sdk_wifi_station_set_config(&config);
 
-    xTaskCreate(&http_get_task, (signed char *)"get_task", 1024 ,  NULL , 2, &xHandle );
+    xTaskCreate(&http_get_task, (signed char *)"get_task", 1500 ,  NULL , 2, &xHandle );
 }
