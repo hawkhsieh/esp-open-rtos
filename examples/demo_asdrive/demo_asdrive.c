@@ -46,7 +46,7 @@
 #include "start_link.h"
 #include "memory.h"
 
-//#include "asdJson.h"
+#include "asdJson.h"
 #include "string_utility.h"
 #include "fsm.h"
 
@@ -395,7 +395,7 @@ typedef struct
     FSM fsm;
 
 }Linkd;
-#if JSON
+
 char *agent_bind_keys[] = { "p","status",0};
 
 typedef struct{
@@ -416,7 +416,6 @@ int AgentBind_Assign(char **data, void *globol_context , void *local_context )
 
     return 0;
 }
-#endif
 
 
 int agent_bind(char **data, void *globol_context , void *local_context )
@@ -447,23 +446,31 @@ int agent_bind(char **data, void *globol_context , void *local_context )
     logprintf("++++request(%d bytes read)++++\n",ret);
     printHunk( (char*)http_buf , ret , LOGBUF_LENGTH );
 
-#if 0
     AgentBind agent_bind_json;
     transition perform_trans={0, FUNCTION(AgentBind_Assign),   1,-1, ACCEPT };
 
-    char *httu_buf_json = getJson( http_buf , ret );
-    if ( httu_buf_json == 0 )
-    asdJsonFSM_Parse( http_buf , &agent_bind_json , &perform_trans , agent_bind_keys );
+    String http_buf_json = getJson( http_buf , ret );
+    if ( http_buf_json.point == 0 ){
+        logprintf("[ERROR] json format is invalid\n" );
+        return 0;
+    }
+
+    asdJsonFSM_Parse( &http_buf_json , &agent_bind_json , &perform_trans , agent_bind_keys );
 
 
     logprintf("p:%s\n",agent_bind_json.p);
     logprintf("status:%s\n",agent_bind_json.status);
-#endif
+
     return 0;
 }
 
 int get_relay(char **data, void *globol_context , void *local_context )
 {
+    Linkd *linkd_inst=(Linkd *)*data;
+
+    TLSConnect *conn = &linkd_inst->conn;
+    char *http_buf=linkd_inst->http_buf;
+
     return 0;
 }
 
@@ -488,13 +495,12 @@ typedef enum{
 
 transition linkd_transition[] = {
     {AGENT_BIND, FUNCTION(agent_bind),       AGENT_BIND,AGENT_BIND, ACCEPT },
-    #if 0
+#if 0
     {AGENT_BIND, FUNCTION(agent_bind),       SERIVCE_GET_RELAY,AGENT_BIND, ACCEPT },
     {SERIVCE_GET_RELAY, FUNCTION(get_relay), RS_CONNECT       ,AGENT_BIND, ACCEPT },
     {RS_CONNECT, FUNCTION(rs_connect),       RS_CONNECT       ,SERIVCE_GET_RELAY, ACCEPT },
     {RS_SUPERVISOR, FUNCTION(supervisor),    RS_SUPERVISOR    ,SERIVCE_GET_RELAY, ACCEPT },
-    #endif
-
+#endif
     {-1}
 };
 
