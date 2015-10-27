@@ -24,7 +24,7 @@
 #ifndef __SSID_CONFIG_H__
 #define __SSID_CONFIG_H__
 
-#define WIFI_SSID "NETGEAR46"
+#define WIFI_SSID "M510"
 #define WIFI_PASS "0973171371"
 
 #endif // __SSID_CONFIG_H__

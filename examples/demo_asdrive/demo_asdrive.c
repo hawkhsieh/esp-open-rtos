@@ -43,13 +43,14 @@
 
 
 #include "syslog.h"
-#include "start_link.h"
+//#include "start_link.h"
+//#include "rly_client.h"
+#include "build_request.h"
 #include "memory.h"
 
 #include "asdJson.h"
 #include "string_utility.h"
 #include "fsm.h"
-
 #define AES_BLOCK_SIZE 16
 
 
@@ -238,7 +239,7 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
         if((ret = mbedtls_net_connect(&server_fd, "54.64.145.83",
                                       WEB_PORT, MBEDTLS_NET_PROTO_TCP)) != 0)
         {
-            logprintf(" failed\n  ! mbedtls_net_connect returned %d\n\n", ret);
+            logprintf("[ERROR] mbedtls_net_connect returned %d\n\n", ret);
             goto exit;
         }
 
@@ -396,17 +397,18 @@ typedef struct
 
 }Linkd;
 
-char *agent_bind_keys[] = { "p","status",0};
-
 typedef struct{
     char *p;
     char *status;
-}AgentBind;
+    char *errmsg;
+    char *errno_json;
 
-int AgentBind_Assign(char **data, void *globol_context , void *local_context )
+}EncryptResponse;
+
+int EncryptResponse_Assign(char **data, void *globol_context , void *local_context )
 {
     KeyValue *key_value = (KeyValue *)globol_context;
-    AgentBind *agent_bind = (AgentBind*)asdJsonFSM_GetData(data);
+    EncryptResponse *agent_bind = (EncryptResponse*)asdJsonFSM_GetData(data);
 
     if ( strcmp( key_value->key , "p") == 0 ){
         agent_bind->p=key_value->value;
@@ -418,45 +420,53 @@ int AgentBind_Assign(char **data, void *globol_context , void *local_context )
 }
 
 
-int agent_bind(char **data, void *globol_context , void *local_context )
+int LinkdEncryptRequest( TLSConnect *conn , char *http_buf , int http_buf_len, EncryptResponse *response )
 {
-    Linkd *linkd_inst=(Linkd *)*data;
-
-    TLSConnect *conn = &linkd_inst->conn;
-    char *http_buf=linkd_inst->http_buf;
-
     logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
-    logprintf( "linkd_inst=%x\n",linkd_inst);
-    logprintf( "%u %u\n",linkd_inst->conn.entropy.accumulator.total[0] ,linkd_inst->conn.entropy.accumulator.total[1]);
-    char *body = malloc(512);
-    int body_len=getBingAgentBody(body,512);
-    int http_buf_len=snprintf( http_buf , HTTP_REQUEST_MAXLEN ,
-                               "POST /agent/bind HTTP/1.1\r\n"\
-                               "Host: api.dch.dlink.com:443\r\n"\
-                               "Content-Type: application/x-www-form-urlencoded\r\n"\
-                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
-    free(body);
     int ret;
-    ret = TLSConnect_SendReq( conn , http_buf , http_buf_len , (char *)http_buf , http_buf_len );
+    ret = TLSConnect_SendReq( conn , http_buf , http_buf_len , (char *)http_buf , HTTP_REQUEST_MAXLEN );
 
     if(ret <= 0){
-        halt("agent/bind failed\n");
+        halt("TLSConnect_SendReq failed\n");
     }
     logprintf("++++request(%d bytes read)++++\n",ret);
     printHunk( (char*)http_buf , ret , LOGBUF_LENGTH );
-
-    AgentBind agent_bind_json;
-    transition perform_trans={0, FUNCTION(AgentBind_Assign),   1,-1, ACCEPT };
-
+    transition perform_trans={0, FUNCTION(EncryptResponse_Assign),   1,-1, ACCEPT };
     String http_buf_json = getJson( http_buf , ret );
     if ( http_buf_json.point == 0 ){
         logprintf("[ERROR] json format is invalid\n" );
-        return 0;
+        return -1;
     }
+    char *agent_bind_keys[] = { "p","status",0};
+    asdJsonFSM_Parse( &http_buf_json , response , &perform_trans , agent_bind_keys );
 
-    asdJsonFSM_Parse( &http_buf_json , &agent_bind_json , &perform_trans , agent_bind_keys );
+    return 0;
+}
 
+
+
+int agent_bind(char **data, void *globol_context , void *local_context )
+{
+    Linkd *linkd_inst=(Linkd *)*data;
+    logprintf("----------------[api.dch.dlink.com] POST /agent/bind--------------------\n");
+
+    char *body = malloc(512);
+    int body_len=getBingAgentBody(body,512);
+    int http_buf_len=snprintf( linkd_inst->http_buf , HTTP_REQUEST_MAXLEN ,
+                               "POST /agent/bind HTTP/1.1\r\n"\
+                               "Host: api.dch.dlink.com\r\n"\
+                               "Content-Type: application/x-www-form-urlencoded\r\n"\
+                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
+    free(body);
+
+    logprintf( "++++full request++++\n");
+    printHunk( (char *)linkd_inst->http_buf , http_buf_len , LOGBUF_LENGTH );
+
+    EncryptResponse agent_bind_json;
+    bzero(&agent_bind_json,sizeof(EncryptResponse));
+
+    LinkdEncryptRequest( &linkd_inst->conn ,linkd_inst->http_buf , http_buf_len ,&agent_bind_json);
 
     logprintf("p:%s\n",agent_bind_json.p);
     logprintf("status:%s\n",agent_bind_json.status);
@@ -464,12 +474,37 @@ int agent_bind(char **data, void *globol_context , void *local_context )
     return 0;
 }
 
+
+
+
+
 int get_relay(char **data, void *globol_context , void *local_context )
 {
-    Linkd *linkd_inst=(Linkd *)*data;
 
-    TLSConnect *conn = &linkd_inst->conn;
-    char *http_buf=linkd_inst->http_buf;
+    Linkd *linkd_inst=(Linkd *)*data;
+    logprintf("----------------[api.dch.dlink.com] POST /agent/relay/get-----------------\n");
+
+    char *body = malloc(512);
+    int body_len=getRelayBody(body,512);
+    int http_buf_len=snprintf( linkd_inst->http_buf , HTTP_REQUEST_MAXLEN ,
+                               "POST /agent/relay/get HTTP/1.1\r\n"\
+                               "Host: api.dch.dlink.com\r\n"\
+                               "Content-Type: application/x-www-form-urlencoded\r\n"\
+                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
+
+    free(body);
+    EncryptResponse response;
+    bzero(&response,sizeof(EncryptResponse));
+
+    if ( LinkdEncryptRequest( &linkd_inst->conn ,linkd_inst->http_buf , http_buf_len ,&response) == 0 )
+    {
+        logprintf("p:%s\n",response.p);
+        logprintf("status:%s\n",response.status);
+    }else{
+        logprintf("errno:%s\n",response.errno_json );
+        logprintf("errmsg:%s\n",response.errmsg);
+        return -1;
+    }
 
     return 0;
 }
@@ -477,11 +512,13 @@ int get_relay(char **data, void *globol_context , void *local_context )
 
 int rs_connect(char **data, void *globol_context , void *local_context )
 {
+    halt("----------------POST /connect--------------------\n");
     return 0;
 }
 
 int supervisor(char **data, void *globol_context , void *local_context )
 {
+    logprintf("------------------------------------\n");
     return 0;
 }
 
@@ -494,13 +531,12 @@ typedef enum{
 }LinkdStatus;
 
 transition linkd_transition[] = {
-    {AGENT_BIND, FUNCTION(agent_bind),       AGENT_BIND,AGENT_BIND, ACCEPT },
-#if 0
+//    {AGENT_BIND, FUNCTION(agent_bind),       AGENT_BIND,AGENT_BIND, ACCEPT },
+
     {AGENT_BIND, FUNCTION(agent_bind),       SERIVCE_GET_RELAY,AGENT_BIND, ACCEPT },
     {SERIVCE_GET_RELAY, FUNCTION(get_relay), RS_CONNECT       ,AGENT_BIND, ACCEPT },
     {RS_CONNECT, FUNCTION(rs_connect),       RS_CONNECT       ,SERIVCE_GET_RELAY, ACCEPT },
     {RS_SUPERVISOR, FUNCTION(supervisor),    RS_SUPERVISOR    ,SERIVCE_GET_RELAY, ACCEPT },
-#endif
     {-1}
 };
 
