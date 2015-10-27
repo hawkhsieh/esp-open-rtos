@@ -21,7 +21,6 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/aes_encrypt
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/relayd/client
 INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/soc/esp8266
 
-
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdJson.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdUART.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdResponse.c
@@ -40,6 +39,7 @@ asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_config.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/linkd_file.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/build_request.c
+asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/linkd/fetch_response.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/hmac-md5.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/base64.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/md5encrypt/md5c.c

@@ -42,10 +42,11 @@
 #include "mbedtls/certs.h"
 
 
-#include "syslog.h"
+#include "log_control.h"
 //#include "start_link.h"
 //#include "rly_client.h"
 #include "build_request.h"
+#include "fetch_response.h"
 #include "memory.h"
 
 #include "asdJson.h"
@@ -367,9 +368,10 @@ int TLSConnect_SendReq( TLSConnect *conn , char *request , int request_len , cha
 
 }
 
-void sleep( int second )
+unsigned int sleep( unsigned int second )
 {
     vTaskDelay( second / portTICK_RATE_MS);
+    return 0;
 }
 
 
@@ -399,6 +401,7 @@ typedef struct
 
 typedef struct{
     char *p;
+    char *iv;
     char *status;
     char *errmsg;
     char *errno_json;
@@ -414,6 +417,8 @@ int EncryptResponse_Assign(char **data, void *globol_context , void *local_conte
         agent_bind->p=key_value->value;
     }else if( strcmp( key_value->key , "status") == 0 ){
         agent_bind->status = key_value->value;
+    }else if( strcmp( key_value->key , "iv") == 0 ){
+        agent_bind->iv = key_value->value;
     }
 
     return 0;
@@ -438,7 +443,7 @@ int LinkdEncryptRequest( TLSConnect *conn , char *http_buf , int http_buf_len, E
         logprintf("[ERROR] json format is invalid\n" );
         return -1;
     }
-    char *agent_bind_keys[] = { "p","status",0};
+    char *agent_bind_keys[] = { "p","status","iv",0};
     asdJsonFSM_Parse( &http_buf_json , response , &perform_trans , agent_bind_keys );
 
     return 0;
@@ -496,15 +501,31 @@ int get_relay(char **data, void *globol_context , void *local_context )
     EncryptResponse response;
     bzero(&response,sizeof(EncryptResponse));
 
-    if ( LinkdEncryptRequest( &linkd_inst->conn ,linkd_inst->http_buf , http_buf_len ,&response) == 0 )
+    if ( LinkdEncryptRequest( &linkd_inst->conn ,linkd_inst->http_buf , http_buf_len ,&response) )
     {
-        logprintf("p:%s\n",response.p);
-        logprintf("status:%s\n",response.status);
-    }else{
         logprintf("errno:%s\n",response.errno_json );
         logprintf("errmsg:%s\n",response.errmsg);
         return -1;
     }
+
+    logprintf("p:%s\n",response.p);
+    logprintf("iv:%s\n",response.iv);
+
+    logprintf("status:%s\n",response.status);
+
+    String p,iv;
+    STRING_LinkString(&p,response.p,strlen(response.p));
+    STRING_LinkString(&iv,response.iv,strlen(response.iv));
+
+    String url,hash;
+
+    decrypt_relay_url( &p , &iv , &url , &hash);
+
+    logprintf("url:%s\n",url.point);
+    logprintf("hash:%s\n",hash.point);
+
+    STRING_FreeString(&url);
+    STRING_FreeString(&hash);
 
     return 0;
 }
