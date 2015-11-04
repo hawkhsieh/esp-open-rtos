@@ -61,6 +61,6 @@ asdrive_SRC_FILES += $(asdrive_MAIN)/SocketToRelay/soc/esp8266/syslog.c
 
 
 
-asdrive_CFLAGS += -D__ESP8266__ -DNO_shm $(CFLAGS)
+asdrive_CFLAGS += -D__ESP8266__ -DNO_shm -DDEBUG $(CFLAGS)
 
 $(eval $(call component_compile_rules,asdrive))

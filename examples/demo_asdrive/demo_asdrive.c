@@ -48,8 +48,8 @@
 #include "build_request.h"
 #include "fetch_response.h"
 #include "memory.h"
-//#include "asdResponse.h"
-//#include "asdUART.h"
+#include "asdResponse.h"
+#include "asdUART.h"
 #include "asdJson.h"
 #include "string_utility.h"
 #include "fsm.h"
@@ -141,7 +141,7 @@ int TLSConnect_Write( TLSConnect *conn , char *data ,int data_len )
     {
         if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
         {
-            logprintf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", ret);
+            logprintf("mbedtls_ssl_write=%d\n\n", ret);
             break;
         }
     }
@@ -170,57 +170,46 @@ int TLSConnect_Init( TLSConnect *conn )
     mbedtls_ssl_init(&conn->ssl);
     mbedtls_x509_crt_init(&conn->cacert);
     mbedtls_ctr_drbg_init(&conn->ctr_drbg);
-    logprintf("\n  . Seeding the random number generator...");
-
     mbedtls_ssl_config_init(&conn->conf);
-
     mbedtls_entropy_init(&conn->entropy);
+
     if((ret = mbedtls_ctr_drbg_seed(&conn->ctr_drbg, mbedtls_entropy_func, &conn->entropy,
                                     (const unsigned char *) pers,
                                     strlen(pers))) != 0)
     {
-        logprintf(" failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret);
-        while(1) {} /* todo: replace with abort() */
+        halt("mbedtls_ctr_drbg_seed=%d\n", ret);
     }
-
-    logprintf(" ok\n");
 
     /*
      * 0. Initialize certificates
      */
-    logprintf("  . Loading the CA root certificate ...");
+    logprintf("Load CA\n");
 
     ret = mbedtls_x509_crt_parse(&conn->cacert, (uint8_t*)server_root_cert, strlen(server_root_cert)+1);
     if(ret < 0)
     {
-        logprintf(" failed\n  !  mbedtls_x509_crt_parse returned -0x%x\n\n", -ret);
-        while(1) {} /* todo: replace with abort() */
+        halt("mbedtls_x509_crt_parse=-0x%x\n", -ret);
     }
-
-    logprintf(" ok (%d skipped)\n", ret);
 
     /* Hostname set here should match CN in server certificate */
     if((ret = mbedtls_ssl_set_hostname(&conn->ssl, WEB_SERVER)) != 0)
     {
-        logprintf(" failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret);
-        while(1) {} /* todo: replace with abort() */
+        halt("mbedtls_ssl_set_hostname=%d\n", ret);
     }
 
     /*
      * 2. Setup stuff
      */
-    logprintf("  . Setting up the SSL/TLS structure...");
+    logprintf("Set SSL/TLS\n");
 
     if((ret = mbedtls_ssl_config_defaults(&conn->conf,
                                           MBEDTLS_SSL_IS_CLIENT,
                                           MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT)) != 0)
     {
-        logprintf(" failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n", ret);
+        errprintf("mbedtls_ssl_config_defaults=%d\n", ret);
         goto exit;
     }
-
-    logprintf(" ok\n");
 
     /* OPTIONAL is not optimal for security, in this example it will print
        a warning if CA verification fails but it will continue to connect.
@@ -235,14 +224,14 @@ int TLSConnect_Init( TLSConnect *conn )
 
     if((ret = mbedtls_ssl_setup(&conn->ssl, &conn->conf)) != 0)
     {
-        logprintf(" failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
+        errprintf("mbedtls_ssl_setup=%d\n", ret);
         goto exit;
     }
 
     /* Wait until we can resolve the DNS for the server, as an indication
        our network is probably working...
     */
-    logprintf("Waiting for server DNS to resolve... ");
+    logprintf("resolving...\n");
     err_t dns_err;
     ip_addr_t host_ip;
     do {
@@ -260,8 +249,6 @@ exit:
 int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_len , char *response , int response_len )
 {
     int ret=0,len=0;
-    logprintf("HTTP get task starting...\n");
-
     uint32_t flags;
     mbedtls_net_context server_fd;
 
@@ -270,94 +257,81 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
         /*
          * 1. Start the connection
          */
-        logprintf("  . Connecting to %s:%s...\n", url , WEB_PORT);
+        logprintf("Connect to %s:443\n", url );
         logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         if((ret = mbedtls_net_connect(&server_fd, url ,
                                       WEB_PORT, MBEDTLS_NET_PROTO_TCP)) != 0)
         {
-            logprintf("[ERROR] mbedtls_net_connect returned %d\n\n", ret);
+            errprintf("mbedtls_net_connect=%d\n", ret);
             goto exit;
         }
-
-        logprintf(" ok\n");
 
         mbedtls_ssl_set_bio(&https->conn.ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 
         /*
          * 4. Handshake
          */
-        logprintf("  . Performing the SSL/TLS handshake...\n");
-        logprintf("heap=%u\n", xPortGetFreeHeapSize());
+        logprintf("mbedtls_ssl_handshake,heap=%u\n", xPortGetFreeHeapSize());
 
         while((ret = mbedtls_ssl_handshake(&https->conn.ssl)) != 0)
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
             {
-                logprintf(" failed\n  ! mbedtls_ssl_handshake returned -0x%x\n\n", -ret);
+                logprintf("mbedtls_ssl_handshake=-0x%x\n", -ret);
                 sleep(1);
                 continue;
             }
         }
-        logprintf("heap=%u\n", xPortGetFreeHeapSize());
-
-        logprintf(" ok\n");
-
         /*
          * 5. Verify the server certificate
          */
-        logprintf("  . Verifying peer X.509 certificate...\n");
+        logprintf("Verifying X.509 cert\n");
 
         /* In real life, we probably want to bail out when ret != 0 */
         if((flags = mbedtls_ssl_get_verify_result(&https->conn.ssl)) != 0)
         {
             char vrfy_buf[512];
 
-            logprintf(" failed\n");
+            errprintf(" failed\n");
 
             mbedtls_x509_crt_verify_info(vrfy_buf, sizeof(vrfy_buf), "  ! ", flags);
 
             logprintf("%s\n", vrfy_buf);
         }
-        else
-            logprintf(" ok\n");
-        logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         /*
          * 3. Write the GET request
          */
-        logprintf("  > Write to server:\n");
 #if 0
         char ip[INET_ADDRSTRLEN];
         int port;
         Network_getInBoundIp( server_fd.fd , ip , &port);
         logprintf("connect to %s:%d\n",ip,port);
 #endif
+        logprintf("<<<(%d)\n", request_len);
+
         while((ret = mbedtls_ssl_write(&https->conn.ssl, (const unsigned char *)request, request_len)) <= 0)
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
             {
-                logprintf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", ret);
+                errprintf("mbedtls_ssl_write=%d\n", ret);
                 goto exit;
             }
         }
-        logprintf("heap=%u\n", xPortGetFreeHeapSize());
-
 //        logprintf("++++request(%d bytes written)++++\n",ret);
 //        printHunk( (char*)request , ret , LOGBUF_LENGTH );
 
         /*
          * 7. Read the HTTP response
          */
-        logprintf("  < Read from server:\n");
-
         do
         {
             logprintf("heap=%u\n", xPortGetFreeHeapSize());
+#define NULL_CHAR 1
+            ret = mbedtls_ssl_read(&https->conn.ssl, (unsigned char *)&response[len], response_len-len-NULL_CHAR );
 
-            ret = mbedtls_ssl_read(&https->conn.ssl, (unsigned char *)&response[len], response_len-len );
-
-            logprintf("read=%d\n", ret );
+            logprintf(">>>(%d)\n", ret );
 
             if(ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
                 continue;
@@ -369,7 +343,7 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
 
             if(ret < 0)
             {
-                logprintf("failed\n  ! mbedtls_ssl_read returned %d\n\n", ret);
+                errprintf("mbedtls_ssl_read=%d\n\n", ret);
                 break;
             }
 
@@ -380,13 +354,10 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
             }
 
             len += ret;
-
-            logprintf("https->trans=%p\n",https->trans);
+            response[len]=0;
 
             if (https->trans){
-                int fsm_ret =run_fsm( &https->fsm , https->trans , &response , https ,0,0);
-                logprintf("fsm_ret=%d\n",fsm_ret);
-                if ( fsm_ret == 0 )
+                if ( run_fsm( &https->fsm , https->trans , &response , https ,0,0) == 0 )
                     break;
             }
             else
@@ -402,7 +373,7 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
         if ( ret < 0 ){
             char error_buf[100];
             mbedtls_strerror(ret, error_buf, 100);
-            logprintf("\n\nLast error was: %d - %s\n\n", ret, error_buf);
+            errprintf("mbedtls: %s\n", ret, error_buf);
         }else
             ret=len;
 
@@ -427,7 +398,7 @@ unsigned int sleep( unsigned int second )
 
 
 
-String getJson( void *data,size_t len )
+String getJson( void *data  )
 {
     String json_string;
     bzero(&json_string,sizeof(String));
@@ -473,20 +444,21 @@ int EncryptResponse_Assign(char **data, void *globol_context , void *local_conte
 
 int LinkdEncryptRequest( HTTPS *https , char *http_buf , int http_buf_len, EncryptResponse *response )
 {
-    logprintf("heap=%u\n", xPortGetFreeHeapSize());
+    printHunk( (char *)http_buf , http_buf_len , LOGBUF_LENGTH );
 
     int ret;
     ret = TLSConnect_SendReq( https , "54.64.145.83" , http_buf , http_buf_len , (char *)http_buf , HTTP_REQUEST_MAXLEN );
 
     if(ret <= 0){
-        halt("TLSConnect_SendReq failed\n");
+        halt("tls failed\n");
     }
-    logprintf("++++request(%d bytes read)++++\n",ret);
+
     printHunk( (char*)http_buf , ret , LOGBUF_LENGTH );
+
     transition perform_trans={0, FUNCTION(EncryptResponse_Assign),   1,-1, ACCEPT };
-    String http_buf_json = getJson( http_buf , ret );
+    String http_buf_json = getJson( http_buf );
     if ( http_buf_json.point == 0 ){
-        logprintf("[ERROR] json format is invalid\n" );
+        errprintf("no json\n" );
         return -1;
     }
     char *agent_bind_keys[] = { "p","status","iv",0};
@@ -495,6 +467,10 @@ int LinkdEncryptRequest( HTTPS *https , char *http_buf , int http_buf_len, Encry
     return 0;
 }
 
+#define http_request_header_fmt "%s HTTP/1.1\r\n"\
+                                "Host: api.dch.dlink.com\r\n"\
+                                "Content-Type: application/x-www-form-urlencoded\r\n"\
+                                "Content-Length: %d\r\n\r\n%s"
 
 int agent_bind(char **data, void *globol_context , void *local_context )
 {
@@ -503,20 +479,16 @@ int agent_bind(char **data, void *globol_context , void *local_context )
     char *body = malloc(512);
     int body_len=getBingAgentBody(body,512);
     int http_buf_len=snprintf( linkd_inst->https.http_buf , HTTP_REQUEST_MAXLEN ,
-                               "POST /agent/bind HTTP/1.1\r\n"\
-                               "Host: api.dch.dlink.com\r\n"\
-                               "Content-Type: application/x-www-form-urlencoded\r\n"\
-                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
+                               http_request_header_fmt , "POST /agent/bind" , body_len , body );
     free(body);
-
-    logprintf( "++++full request++++\n");
-    printHunk( (char *)linkd_inst->https.http_buf , http_buf_len , LOGBUF_LENGTH );
 
     EncryptResponse agent_bind_json;
     bzero(&agent_bind_json,sizeof(EncryptResponse));
 
-
-    LinkdEncryptRequest( &linkd_inst->https ,linkd_inst->https.http_buf , http_buf_len ,&agent_bind_json);
+    if ( LinkdEncryptRequest( &linkd_inst->https ,linkd_inst->https.http_buf , http_buf_len ,&agent_bind_json) ){
+        errprintf("resp err\n");
+        return -1;
+    }
 
     logprintf("p:%s\n",agent_bind_json.p);
     logprintf("status:%s\n",agent_bind_json.status);
@@ -540,10 +512,7 @@ int get_relay(char **data, void *globol_context , void *local_context )
     char *body = malloc(512);
     int body_len=getRelayBody(body,512);
     int http_buf_len=snprintf( linkd_inst->https.http_buf , HTTP_REQUEST_MAXLEN ,
-                               "POST /agent/relay/get HTTP/1.1\r\n"\
-                               "Host: api.dch.dlink.com\r\n"\
-                               "Content-Type: application/x-www-form-urlencoded\r\n"\
-                               "Content-Length: %d\r\n\r\n%s" , body_len , body );
+                               http_request_header_fmt , "POST /agent/relay/get", body_len , body );
 
     free(body);
     EncryptResponse response;
@@ -551,8 +520,6 @@ int get_relay(char **data, void *globol_context , void *local_context )
 
     if ( LinkdEncryptRequest( &linkd_inst->https ,linkd_inst->https.http_buf , http_buf_len ,&response) )
     {
-        logprintf("errno:%s\n",response.errno_json );
-        logprintf("errmsg:%s\n",response.errmsg);
         return -1;
     }
 
@@ -663,222 +630,9 @@ int HttpBody(char **data, void *globol_context , void *local_context )
 #endif
 
 
-
-
-int Response400Bad( HTTPS *https , char *msg )
+#if 0
+static String asdUART_WriteAPI( HTTPS *https,String *json , String *first_line )
 {
-
-#define http_header_400_bad              "HTTP/1.1 400 Bad Request\r\n"\
-                                         "Content-Type: application/json\r\n"\
-                                         "Transfer-Encoding: chunked\r\n"\
-                                         "Connection: close\r\n\r\n"
-    String response;
-    STRING_CreateString(&response , sizeof(http_header_400_bad)+32 );
-    response.length = snprintf( response.point , response.alloc_size , http_header_400_bad , strlen(msg), msg );
-    TLSConnect_Write( &https->conn , response.point , response.length );
-    STRING_FreeString(&response);
-
-}
-int Response200OK( HTTPS *https , char *body_fmt ,  char *msg )
-{
-
-#define http_header_200_ok               "HTTP/1.1 200 OK\r\n"\
-                                         "Access-Control-Allow-Origin: *\r\n"\
-                                         "Content-Type: application/json\r\n"\
-                                         "Transfer-Encoding: chunked\r\n\r\n"\
-                                         "%x\r\n%s\r\n0\r\n\r\n"
-
-    int msg_len=strlen(msg);
-    String body;
-    STRING_CreateString(&body , strlen(body_fmt)+msg_len+10 );
-    body.length = snprintf( body.point , body.alloc_size , body_fmt , msg );
-
-
-    String response;
-    STRING_CreateString(&response , sizeof(http_header_200_ok)+body.length+32 );
-    response.length = snprintf( response.point , response.alloc_size , http_header_200_ok , body.length , body.point );
-    STRING_FreeString(&body);
-    logprintf("%d %s\n",response.length,response.point);
-    TLSConnect_Write( &https->conn , response.point , response.length );
-    STRING_FreeString(&response);
-    return 0;
-}
-
-int ResponseData200OK( HTTPS *https , char *msg )
-{
-
-#define http_header_200_ok               "HTTP/1.1 200 OK\r\n"\
-                                         "Access-Control-Allow-Origin: *\r\n"\
-                                         "Content-Type: application/json\r\n"\
-                                         "Transfer-Encoding: chunked\r\n\r\n"\
-                                         "%x\r\n%s\r\n0\r\n\r\n"
-
-    String response;
-    STRING_CreateString(&response , sizeof(http_header_200_ok)+32 );
-    response.length = snprintf( response.point , response.alloc_size , http_header_200_ok , strlen(msg), msg );
-    TLSConnect_Write( &https->conn , response.point , response.length );
-    STRING_FreeString(&response);
-    return 0;
-}
-
-
-
-
-typedef struct{
-    int port;      ///[In]
-    int baud_rate; ///[In]
-    int start_bit; ///[In]
-    int end_bit;   ///[In]
-    void *uart_session;        ///[Out]
-
-}UARTConfig;
-
-
-
-typedef enum{
-    Encoding_json_hex,
-    Encoding_base64,
-    Encoding_ascii,
-    Encoding_max
-}Encoding;
-
-
-typedef struct{
-    void *session;        ///[In]
-
-    int timeout;       ///[In]
-    int read_size;     ///[In]
-    Encoding encoding; ///[In]
-
-    char *buf;     ///[Out]
-    int size;      ///[Out]
-
-}UARTData;
-
-
-extern char *post_uart[];
-
-static int asdUARTData_Response( HTTPS *https , UARTData *uart_data )
-{
-    String hex_string;
-    STRING_CreateString( &hex_string , 128 );
-
-    int i;
-    for(i=0;i<uart_data->size;i++ )
-    {
-        char number[16];
-        int num_size;
-        num_size=snprintf(number,sizeof(number),"\\u%04x,",(unsigned char)uart_data->buf[i] & 0x00ff );
-        STRING_AppendString( &hex_string , number , num_size );
-    }
-
-    hex_string.point[hex_string.length-1]=0;
-
-    logprintf("%s\n",hex_string.point);
-
-    Response200OK( https , "{\"data\":\"%s\",\"encoding\":\"json_hex\"}" , hex_string.point );
-    STRING_FreeString(&hex_string);
-    return 0;
-}
-
-
-static void *asdUART_ParseInteger( String *first_line , char *key , int key_len )
-{
-    char *key_head=strstr_bmh( first_line->point , first_line->length , key , key_len );
-    if ( key_head == 0 )
-        goto END;
-
-    if ( *(key_head+key_len) != '=' )
-        goto END;
-
-    char *value_head=(key_head+key_len+1);
-
-    unsigned int value;
-    sscanf( value_head , "%" PRIuPTR , &value);
-
-    return (void *)value;
-END:
-    return (void *)-1;
-
-}
-
-
-static int asdUART_ParseFirstLine( String *first_line , UARTData *uart_data )
-{
-
-    uart_data->session = asdUART_ParseInteger( first_line , "session" , sizeof("session")-1);
-    if ( uart_data->session == (void*)-1 )
-        return -1;
-
-    uart_data->timeout = (int)asdUART_ParseInteger( first_line , "timeout" , sizeof("timeout")-1);
-    if ( uart_data->timeout == -1 )
-        uart_data->timeout=1;
-
-    uart_data->read_size = (int)asdUART_ParseInteger( first_line , "read_size" , sizeof("read_size")-1);
-    if ( uart_data->read_size == -1 )
-        uart_data->read_size=1;
-
-    return 0;
-}
-
-typedef void (*asdUART_ReadFunc)(int id,void *data,size_t len);
-
-typedef struct{
-
-    int client_session_id;      //Linkd SDK provides an id to identify a socket of SessionHandle_st
-                                //The Initial value is -1 while asdUART_Config is calling.
-    UARTData uart_data;         //A record for the infomation of long polling response
-
-}asdUART_Session;
-
-#define MAX_PORT 1
-static asdUART_Session *uart_session[MAX_PORT];
-
-static int asdUART_GetSession( UARTData *uart_data )
-{
-
-    int i;
-    for( i=0;i<MAX_PORT;i++){
-        if ( uart_data->session == uart_session[i]->uart_data.session && uart_data->session )
-            break;
-    }
-    if ( i >= MAX_PORT ){
-        miiiprintf(GROUP_API,LEVEL_ERR,"session %lu is not exist\n",(long unsigned int)uart_data->session);
-        return -1;
-    }
-
-    return i;
-}
-
-static int asdUARTData_Assign(char **data, void *globol_context , void *local_context )
-{
-    KeyValue *key_value = (KeyValue *)globol_context;
-    UARTData *uart_data = (UARTData*)asdJsonFSM_GetData(data);
-
-    if ( strcmp( key_value->key , "data") == 0 ){
-
-        char *json_hex_char=key_value->value;
-        int put_pos=0;
-        unsigned int hex;
-        while( sscanf( json_hex_char , "\\u%x" , &hex ) == 1 )
-        {
-            key_value->value[put_pos] = hex;
-            put_pos++;
-            json_hex_char += 7;//  \u0000,
-        }
-        uart_data->buf = malloc(put_pos);
-        memcpy( uart_data->buf , key_value->value , put_pos );
-        uart_data->size = put_pos;
-    }
-
-    return 0;
-}
-
-static int asdUART_WriteAPI( HTTPS *https,String *json , String *first_line )
-{
-    String response;
-    bzero(&response,sizeof(String));
-
     UARTData uart_data;
     bzero(&uart_data,sizeof(UARTData));
 
@@ -907,73 +661,104 @@ static int asdUART_WriteAPI( HTTPS *https,String *json , String *first_line )
 
     uart_data.size=uart_data.read_size;
 
-    asdUARTData_Response( https , &uart_data );
-
+    String response;
+    response = asdUARTData_Response( https , &uart_data );
     free(uart_data.buf);
-    return 0;
+    return response;
 
 }
+#endif
 
 
 int HttpProcessData(char **data, void *globol_context , void *local_context )
 {
-    logprintf( "HttpProcessData\n");
 
     HTTPS *https=(HTTPS *)globol_context;
     char *request=*data;
-    String output;
-    bzero(&output,sizeof(String));
+    String response;
+    bzero(&response,sizeof(String));
     int len=strlen(*data);
-    String json_string=getJson(request,len);
+
+    printHunk( request , len  , HTTP_REQUEST_MAXLEN );
 
     char *lf=strchr(request,'\n');
     if ( lf == 0 ){
-        Response400Bad( https , "No first line" );
-        return -1;
+        response = asdResponse_400( "No first line" );
+        goto END;
     }
     *(lf-1)=0; //Mark the first line
+    char *header= lf+1;
 
-    if ( json_string.point == 0 ){
-        logprintf("no json\n");
-        return -1;
+    char *uri=strchr(request,' ');
+    if (uri==0){
+        response = asdResponse_400( "no 1st space" );
+        goto END;
     }
+
+    uri += 1;
+    int uri_len=strlen(uri);
 
     String first_line;
-    STRING_LinkString(&first_line , request,strlen(request));
+    STRING_LinkString(&first_line , request , strlen(request) );
+    char *method = request;
 
-    if ( strstr_bmh(request,len,"POST /uart/config",sizeof("POST /uart/config")-1) )
-    {
-        if ( json_string.point ){
-    //        output = asdUART_ConfigAPI( &json_string );
+#define nobody "no body"
+#define ACCESS_CONTROL "Access-Control-Request-Method: "
+    if ( strncmp( request, "OPTION" ,4 ) == 0 ){
+
+        char *access_control = strstr_bmh( header , strlen(header) , ACCESS_CONTROL , sizeof(ACCESS_CONTROL ) -1);
+        if ( access_control == 0 ){
+            response = asdResponse_400( "no method" );
+            goto END;
         }
 
-        Response200OK( https , "{\"status\":\"%s\"}" , "success");
+        method = access_control + sizeof(ACCESS_CONTROL ) -1;
     }
-    else if( strstr_bmh(request,len,"POST /uart",sizeof("POST /uart")-1) )
-    {
-        if ( json_string.point ){
-            asdUART_WriteAPI( https , &json_string , &first_line  );
+
+    if ( strncmp( method, "POST" ,4 ) == 0 ){
+        String json_string=getJson(header);
+        if ( json_string.point == 0 ){
+            logprintf( "wait body\n");
+            return -1;
+//            response = asdResponse_400( nobody );
+//            logprintf( nobody "%s\n",header);
+//            goto END;
         }
-    }
-    else if( strstr_bmh(request,len,"GET /uart?",sizeof("GET /uart?")-1) )
-    {
-//        output = asdUART_ReadAPI( &first_line , 0 );
-//        if( strstr_bmh(request,len,"GET /uart?wait=true",sizeof("GET /uart?wait=true")-1) == 0 )
-//            Api_closeSession(id);
-    }
 
+        if ( strstr_bmh(uri,uri_len,"/v1_0_0/uart/config",sizeof("/v1_0_0/uart/config")-1) )
+        {
+            if ( json_string.point ){
+                response = asdUART_ConfigAPI( &json_string );
+            }else{
+                response = asdResponse_400( nobody );
+                logprintf( nobody "\n");
+            }
+        }
+        else if( strstr_bmh(uri,uri_len,"/v1_0_0/uart",sizeof("/v1_0_0/uart")-1) )
+        {
+            if ( json_string.point ){
+                response = asdUART_WriteAPI( &json_string , &first_line , 1234 );
+            }else{
+                response = asdResponse_400( nobody );
+                logprintf( nobody "\n");
+            }
+        }else
+            response = asdResponse_400( "no uri" );
+
+    }else{
+        if( strstr_bmh(uri,uri_len,"/v1_0_0/uart?",sizeof("/v1_0_0/uart?")-1) )
+        {
+            response = asdUART_ReadAPI( &first_line , 0 );
+            //        if( strstr_bmh(request,len,"GET /uart?wait=true",sizeof("GET /uart?wait=true")-1) == 0 )
+            //            Api_closeSession(id);
+        }
+
+    }
+END:
+    TLSConnect_Write( &https->conn , response.point , response.length );
+    STRING_FreeString( &response );
     return 0;
 }
-
-int HttpResponse(char **data, void *globol_context , void *local_context )
-{
-    HTTPS *https = (HTTPS *)globol_context;
-    TLSConnect_Write( &https->conn , https->http_buf , strlen(https->http_buf) );
-
-    return 0;
-}
-
-
 
 int rs_connect(char **data, void *globol_context , void *local_context )
 {
@@ -1019,7 +804,10 @@ int rs_connect(char **data, void *globol_context , void *local_context )
                               (char *)http_buf ,
                               HTTP_REQUEST_MAXLEN );
 
-    return 0;
+    if (ret>=0)
+        return 0;
+    else
+        return -1;
 }
 
 int supervisor(char **data, void *globol_context , void *local_context )
