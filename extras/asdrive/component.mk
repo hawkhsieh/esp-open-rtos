@@ -24,6 +24,7 @@ INC_DIRS +=$(asdrive_MAIN)/SocketToRelay/soc/esp8266
 
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdJson.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdUART.c
+asdrive_SRC_FILES += $(asdrive_MAIN)/asdGPIO.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/asdResponse.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/fsm/src/fsm.c
 asdrive_SRC_FILES += $(asdrive_MAIN)/jsmn/jsmn.c

@@ -8,7 +8,7 @@
 #include "task.h"
 #include "esp8266.h"
 
-const int gpio = 14;
+const int gpio = 13;
 
 /* This task uses the high level GPIO API (esp_gpio.h) to blink an LED.
  *

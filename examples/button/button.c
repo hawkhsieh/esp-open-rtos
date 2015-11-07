@@ -13,7 +13,7 @@
 #include "esp8266.h"
 
 /* pin config */
-const int gpio = 0;   /* gpio 0 usually has "PROGRAM" button attached */
+const int gpio = 4;   /* gpio 0 usually has "PROGRAM" button attached */
 const int active = 0; /* active == 0 for active low */
 const gpio_inttype_t int_type = GPIO_INTTYPE_EDGE_NEG;
 #define GPIO_HANDLER gpio00_interrupt_handler

@@ -50,6 +50,7 @@
 #include "memory.h"
 #include "asdResponse.h"
 #include "asdUART.h"
+#include "asdGPIO.h"
 #include "asdJson.h"
 #include "string_utility.h"
 #include "fsm.h"
@@ -703,6 +704,9 @@ int HttpProcessData(char **data, void *globol_context , void *local_context )
     char *method = request;
 
 #define nobody "no body"
+#define nouri "no uri"
+
+#if 0
 #define ACCESS_CONTROL "Access-Control-Request-Method: "
     if ( strncmp( request, "OPTION" ,4 ) == 0 ){
 
@@ -714,45 +718,65 @@ int HttpProcessData(char **data, void *globol_context , void *local_context )
 
         method = access_control + sizeof(ACCESS_CONTROL ) -1;
     }
+#endif
+
+    char *version;
+    version=strstr_bmh(uri,uri_len,"/v1_0_0/",sizeof("/v1_0_0/")-1);
+    if ( version == 0 ){
+        response = asdResponse_400( "no version" );
+        goto END;
+    }
+
+    char *path=version+sizeof("/v1_0_0/")-1;
+    int path_len=strlen(path);
+
+    logprintf( "======path:%s\n",path);
+
 
     if ( strncmp( method, "POST" ,4 ) == 0 ){
         String json_string=getJson(header);
-        if ( json_string.point == 0 ){
-            logprintf( "wait body\n");
-            return -1;
-//            response = asdResponse_400( nobody );
-//            logprintf( nobody "%s\n",header);
-//            goto END;
-        }
 
-        if ( strstr_bmh(uri,uri_len,"/v1_0_0/uart/config",sizeof("/v1_0_0/uart/config")-1) )
+        if ( strstr_bmh(uri,uri_len,"/uart/config?",sizeof("/uart/config?")-1) )
         {
             if ( json_string.point ){
                 response = asdUART_ConfigAPI( &json_string );
             }else{
-                response = asdResponse_400( nobody );
-                logprintf( nobody "\n");
+                return -1;
             }
         }
-        else if( strstr_bmh(uri,uri_len,"/v1_0_0/uart",sizeof("/v1_0_0/uart")-1) )
+        else if( strstr_bmh(uri,uri_len,"uart?",sizeof("uart?")-1) )
         {
             if ( json_string.point ){
                 response = asdUART_WriteAPI( &json_string , &first_line , 1234 );
             }else{
-                response = asdResponse_400( nobody );
-                logprintf( nobody "\n");
+                return -1;
             }
+        }else if ( strstr_bmh(uri,uri_len,"gpio/config?",sizeof("gpio/config/")-1) )
+        {
+            if ( json_string.point ){
+                response = asdGPIO_ConfigAPI( &json_string );
+            }else{
+                return -1;
+            }
+        }
+        else if( strstr_bmh(uri,uri_len,"gpio?",sizeof("gpio?")-1) )
+        {
+            response = asdGPIO_WriteAPI( &json_string );
         }else
-            response = asdResponse_400( "no uri" );
+            response = asdResponse_400( nouri );
 
     }else{
-        if( strstr_bmh(uri,uri_len,"/v1_0_0/uart?",sizeof("/v1_0_0/uart?")-1) )
+        if( strstr_bmh(uri,uri_len,"uart?",sizeof("uart?")-1) )
         {
             response = asdUART_ReadAPI( &first_line , 0 );
             //        if( strstr_bmh(request,len,"GET /uart?wait=true",sizeof("GET /uart?wait=true")-1) == 0 )
             //            Api_closeSession(id);
-        }
 
+        }else if( strstr_bmh(uri,uri_len,"gpio/",sizeof("gpio/")-1) ){
+
+            response = asdGPIO_ReadAPI( &first_line );
+        }else
+            response = asdResponse_400( nouri );
     }
 END:
     TLSConnect_Write( &https->conn , response.point , response.length );
