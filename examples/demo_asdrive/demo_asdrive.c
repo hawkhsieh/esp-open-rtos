@@ -253,7 +253,6 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
     uint32_t flags;
     mbedtls_net_context server_fd;
 
-
         mbedtls_net_init(&server_fd);
         /*
          * 1. Start the connection
@@ -275,7 +274,8 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
          */
         logprintf("mbedtls_ssl_handshake,heap=%u\n", xPortGetFreeHeapSize());
 
-        while((ret = mbedtls_ssl_handshake(&https->conn.ssl)) != 0)
+        int retry=3;
+        while((ret = mbedtls_ssl_handshake(&https->conn.ssl)) != 0 && retry-- )
         {
             if(ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
             {
@@ -393,7 +393,7 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
 
 unsigned int sleep( unsigned int second )
 {
-    vTaskDelay( second / portTICK_RATE_MS);
+    vTaskDelay( second*1000 / portTICK_RATE_MS);
     return 0;
 }
 
