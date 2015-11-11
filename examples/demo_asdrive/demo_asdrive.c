@@ -59,8 +59,10 @@
 
 #define AES_BLOCK_SIZE 16
 
+#define HTTP
+//#define WEB_SERVER "api.dch.dlink.com"
+#define WEB_SERVER "api.astra.miiicasa.com"
 
-#define WEB_SERVER "api.dch.dlink.com"
 #define WEB_PORT "443"
 
 /* Root cert for howsmyssl.com, stored in cert.c */
@@ -123,6 +125,9 @@ typedef struct{
     transition *trans;
     char http_buf[HTTP_REQUEST_MAXLEN];
     TLSConnect conn;
+#ifdef HTTP
+    int socket_fd;
+#endif
     char *app_data;
 }HTTPS;
 
@@ -247,6 +252,78 @@ exit:
     return -1;
 }
 
+#ifdef HTTP
+int HTTPConnect_SendReq( HTTPS *https , char *url , char *request , int request_len , char *response , int response_len )
+{
+    int ret=-1;
+    const struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
+    };
+    struct addrinfo *res;
+
+    int err = getaddrinfo( url, "80", &hints, &res);
+
+    if(err != 0 || res == NULL) {
+        printf("DNS x err=%d res=%p\r\n", err, res);
+        if(res)
+            freeaddrinfo(res);
+        vTaskDelay(1000 / portTICK_RATE_MS);
+        goto END;
+    }
+    /* Note: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r for "real" code */
+    struct in_addr *addr = &((struct sockaddr_in *)res->ai_addr)->sin_addr;
+    printf( "%s=%s\r\n",url, inet_ntoa(*addr));
+
+    int s = socket(res->ai_family, res->ai_socktype, 0);
+    if(s < 0) {
+        printf("... Failed to allocate socket.\r\n");
+        freeaddrinfo(res);
+        vTaskDelay(1000 / portTICK_RATE_MS);
+        goto END;
+    }
+
+    if(connect(s, res->ai_addr, res->ai_addrlen) != 0) {
+        close(s);
+        freeaddrinfo(res);
+        printf("... socket connect failed.\r\n");
+        vTaskDelay(4000 / portTICK_RATE_MS);
+        goto END;
+    }
+
+    freeaddrinfo(res);
+
+    if (write(s, request, request_len) < 0) {
+        printf("... socket send failed\r\n");
+        close(s);
+        vTaskDelay(4000 / portTICK_RATE_MS);
+        goto END;
+    }
+    int len=0;
+    https->socket_fd=s;
+    do{
+        ret = recv( s, &response[len] , response_len-len,0);
+        if ( ret < 0 )
+            break;
+
+        len += ret;
+        response[len]=0;
+
+        if (https->trans){
+            if ( run_fsm( &https->fsm , https->trans , &response , https ,0,0) == 0 )
+                break;
+        }
+        else
+            break;
+
+    }while( ret >= 0 );
+    ret = len;
+    close(s);
+END:
+    return ret;
+
+}
+#endif
 int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_len , char *response , int response_len )
 {
     int ret=0,len=0;
@@ -448,8 +525,11 @@ int LinkdEncryptRequest( HTTPS *https , char *http_buf , int http_buf_len, Encry
     printHunk( (char *)http_buf , http_buf_len , LOGBUF_LENGTH );
 
     int ret;
+#ifdef HTTP
+    ret = HTTPConnect_SendReq( https , WEB_SERVER , http_buf , http_buf_len , (char *)http_buf , HTTP_REQUEST_MAXLEN );
+#else
     ret = TLSConnect_SendReq( https , "54.64.145.83" , http_buf , http_buf_len , (char *)http_buf , HTTP_REQUEST_MAXLEN );
-
+#endif
     if(ret <= 0){
         halt("tls failed\n");
     }
@@ -469,7 +549,7 @@ int LinkdEncryptRequest( HTTPS *https , char *http_buf , int http_buf_len, Encry
 }
 
 #define http_request_header_fmt "%s HTTP/1.1\r\n"\
-                                "Host: api.dch.dlink.com\r\n"\
+                                "Host: " WEB_SERVER "\r\n"\
                                 "Content-Type: application/x-www-form-urlencoded\r\n"\
                                 "Content-Length: %d\r\n\r\n%s"
 
@@ -504,7 +584,7 @@ int get_relay(char **data, void *globol_context , void *local_context )
 {
 
     Linkd *linkd_inst=(Linkd *)*data;
-    logprintf("POST /agent/relay/get\n");
+    logprintf("POST /agent/v2/relay/get\n");
     logprintf("relay_server=%p,hash=%p\n",linkd_inst->relay_server,linkd_inst->hash);
 
     free( linkd_inst->relay_server );linkd_inst->relay_server=0;
@@ -513,7 +593,7 @@ int get_relay(char **data, void *globol_context , void *local_context )
     char *body = malloc(512);
     int body_len=getRelayBody(body,512);
     int http_buf_len=snprintf( linkd_inst->https.http_buf , HTTP_REQUEST_MAXLEN ,
-                               http_request_header_fmt , "POST /agent/relay/get", body_len , body );
+                               http_request_header_fmt , "POST /agent/v2/relay/get", body_len , body );
 
     free(body);
     EncryptResponse response;
@@ -524,9 +604,9 @@ int get_relay(char **data, void *globol_context , void *local_context )
         return -1;
     }
 
-//    logprintf("p:%s\n",response.p);
-//    logprintf("iv:%s\n",response.iv);
-//    logprintf("status:%s\n",response.status);
+    logprintf("p:%s\n",response.p);
+    logprintf("iv:%s\n",response.iv);
+    logprintf("status:%s\n",response.status);
 
     String p,iv;
     STRING_LinkString(&p,response.p,strlen(response.p));
@@ -840,7 +920,7 @@ int supervisor(char **data, void *globol_context , void *local_context )
 }
 
 typedef enum{
-    AGENT_BIND,
+ //   AGENT_BIND,
     SERIVCE_GET_RELAY,
     RS_CONNECT,
     RS_SUPERVISOR
@@ -865,8 +945,8 @@ void http_get_task(void *param)
 const transition linkd_transition[] = {
 //    {AGENT_BIND, FUNCTION(agent_bind),       AGENT_BIND,AGENT_BIND, ACCEPT },
 
-    {AGENT_BIND, FUNCTION(agent_bind),       SERIVCE_GET_RELAY,AGENT_BIND, ACCEPT },
-    {SERIVCE_GET_RELAY, FUNCTION(get_relay), RS_CONNECT       ,AGENT_BIND, ACCEPT },
+//    {AGENT_BIND, FUNCTION(agent_bind),       SERIVCE_GET_RELAY,AGENT_BIND, ACCEPT },
+    {SERIVCE_GET_RELAY, FUNCTION(get_relay), RS_CONNECT       ,RS_CONNECT, ACCEPT },
     {RS_CONNECT, FUNCTION(rs_connect),       RS_CONNECT       ,SERIVCE_GET_RELAY, ACCEPT },
    // {RS_SUPERVISOR, FUNCTION(supervisor),    RS_SUPERVISOR    ,SERIVCE_GET_RELAY, ACCEPT },
     {-1}
