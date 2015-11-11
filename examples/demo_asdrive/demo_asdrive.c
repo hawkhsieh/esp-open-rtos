@@ -63,7 +63,7 @@
 //#define WEB_SERVER "api.dch.dlink.com"
 #define WEB_SERVER "api.astra.miiicasa.com"
 
-#define WEB_PORT "443"
+#define WEB_PORT "80"
 
 /* Root cert for howsmyssl.com, stored in cert.c */
 extern const char *server_root_cert;
@@ -135,9 +135,24 @@ typedef struct
 {
     FSM fsm;
     char *relay_server;
-    char *hash;
+    char *p;
+    char *iv;
     HTTPS https;
 }Linkd;
+
+
+
+
+int HTTPConnect_Write( int socket_fd , char *data ,int data_len )
+{
+    int len = write(socket_fd, data, data_len);
+    if ( len < 0) {
+        errnologprintf("write");
+        close(socket_fd);
+    }
+
+    return len;
+}
 
 
 int TLSConnect_Write( TLSConnect *conn , char *data ,int data_len )
@@ -262,7 +277,7 @@ int HTTPConnect_SendReq( HTTPS *https , char *url , char *request , int request_
     };
     struct addrinfo *res;
 
-    int err = getaddrinfo( url, "80", &hints, &res);
+    int err = getaddrinfo( url, WEB_PORT, &hints, &res);
 
     if(err != 0 || res == NULL) {
         printf("DNS x err=%d res=%p\r\n", err, res);
@@ -334,7 +349,7 @@ int TLSConnect_SendReq( HTTPS *https , char *url , char *request , int request_l
         /*
          * 1. Start the connection
          */
-        logprintf("Connect to %s:443\n", url );
+        logprintf("Connect to %s:" WEB_PORT "\n", url );
         logprintf("heap=%u\n", xPortGetFreeHeapSize());
 
         if((ret = mbedtls_net_connect(&server_fd, url ,
@@ -498,7 +513,7 @@ typedef struct{
     char *status;
     char *errmsg;
     char *errno_json;
-
+    char *relay_server;
 }EncryptResponse;
 
 int EncryptResponse_Assign(char **data, void *globol_context , void *local_context )
@@ -512,6 +527,8 @@ int EncryptResponse_Assign(char **data, void *globol_context , void *local_conte
         agent_bind->status = key_value->value;
     }else if( strcmp( key_value->key , "iv") == 0 ){
         agent_bind->iv = key_value->value;
+    }else if( strcmp( key_value->key , "relay_server") == 0 ){
+        agent_bind->relay_server = key_value->value;
     }
 
     return 0;
@@ -542,7 +559,7 @@ int LinkdEncryptRequest( HTTPS *https , char *http_buf , int http_buf_len, Encry
         errprintf("no json\n" );
         return -1;
     }
-    char *agent_bind_keys[] = { "p","status","iv",0};
+    char *agent_bind_keys[] = { "p","status","iv","relay_server",0};
     asdJsonFSM_Parse( &http_buf_json , response , &perform_trans , agent_bind_keys );
 
     return 0;
@@ -585,10 +602,11 @@ int get_relay(char **data, void *globol_context , void *local_context )
 
     Linkd *linkd_inst=(Linkd *)*data;
     logprintf("POST /agent/v2/relay/get\n");
-    logprintf("relay_server=%p,hash=%p\n",linkd_inst->relay_server,linkd_inst->hash);
+    logprintf("rs=%p,p=%p,iv=%p\n",linkd_inst->relay_server,linkd_inst->p , linkd_inst->iv);
 
     free( linkd_inst->relay_server );linkd_inst->relay_server=0;
-    free( linkd_inst->hash );linkd_inst->hash=0;
+    free( linkd_inst->p );linkd_inst->p=0;
+    free( linkd_inst->iv );linkd_inst->iv=0;
 
     char *body = malloc(512);
     int body_len=getRelayBody(body,512);
@@ -604,19 +622,14 @@ int get_relay(char **data, void *globol_context , void *local_context )
         return -1;
     }
 
+    logprintf("status:%s\n",response.status);
     logprintf("p:%s\n",response.p);
     logprintf("iv:%s\n",response.iv);
-    logprintf("status:%s\n",response.status);
+    logprintf("relay_server:%s\n",response.status);
 
-    String p,iv;
-    STRING_LinkString(&p,response.p,strlen(response.p));
-    STRING_LinkString(&iv,response.iv,strlen(response.iv));
-
-    String url,hash;
-    decrypt_relay_url( &p , &iv , &url , &hash);
-
-    linkd_inst->relay_server = url.point;
-    linkd_inst->hash = hash.point;
+    linkd_inst->p = strdup(response.p);
+    linkd_inst->iv = strdup(response.iv);
+    linkd_inst->relay_server = strdup(response.relay_server);
 
     return 0;
 }
@@ -859,27 +872,28 @@ int HttpProcessData(char **data, void *globol_context , void *local_context )
             response = asdResponse_400( nouri );
     }
 END:
+#ifdef HTTP
+    HTTPConnect_Write( https->socket_fd , response.point , response.length );
+#else
     TLSConnect_Write( &https->conn , response.point , response.length );
+#endif
     STRING_FreeString( &response );
     return 0;
 }
 
 int rs_connect(char **data, void *globol_context , void *local_context )
 {
+#define CONNECT2 "POST /connect2"
     Linkd *linkd_inst=(Linkd *)*data;
-    logprintf("[%s] POST /connect\n",linkd_inst->relay_server);
+    logprintf("[%s] " CONNECT2 "\n",linkd_inst->relay_server);
 
-    char *body = malloc(512);
-    int body_len=getBingAgentBody(body,512);
     char *did = "b7e15a006ea42c4246486863a96a5589";
     char *http_buf=linkd_inst->https.http_buf;
     int http_buf_len=snprintf( http_buf , HTTP_REQUEST_MAXLEN ,
-                               "POST /connect HTTP/1.1\r\n"\
+                               CONNECT2 " HTTP/1.1\r\n"\
                                "Host: %s\r\n"\
-                               "Content-Type: text\r\n\r\n"\
-                               "\"did\":\"%s\"\r\n"\
-                               "\"hash\":\"%s\"\r\n\r\n", linkd_inst->relay_server , did , linkd_inst->hash );
-    free(body);
+                               "Content-Type: application/json\r\n\r\n"\
+                               "{\"p\":\"%s\",\"iv\":\"%s\"", linkd_inst->relay_server , linkd_inst->p , linkd_inst->iv );
 
     printHunk( (char *)http_buf , http_buf_len , LOGBUF_LENGTH );
 
@@ -900,14 +914,21 @@ int rs_connect(char **data, void *globol_context , void *local_context )
 //    HttpContent relay;
 //    bzero(&relay,sizeof(HttpContent));
 //    linkd_inst->https.app_data = (void*)&relay;
-
+#ifdef HTTP
+    ret = HTTPConnect_SendReq(&linkd_inst->https ,
+                              linkd_inst->relay_server ,
+                              http_buf ,
+                              http_buf_len ,
+                              (char *)http_buf ,
+                              HTTP_REQUEST_MAXLEN );
+#else
     ret = TLSConnect_SendReq( &linkd_inst->https ,
                               linkd_inst->relay_server ,
                               http_buf ,
                               http_buf_len ,
                               (char *)http_buf ,
                               HTTP_REQUEST_MAXLEN );
-
+#endif
     if (ret>=0)
         return 0;
     else
