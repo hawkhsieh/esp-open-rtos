@@ -1026,8 +1026,8 @@ void user_init(void)
     logprintf("SDK version:%s\n", sdk_system_get_sdk_version());
 
     struct sdk_station_config config = {
-        .ssid = WIFI_SSID,
-        .password = WIFI_PASS,
+        .ssid = "miiicasa",
+        .password = "53345405",
     };
 
     /* required to call wifi_set_opmode before station_set_config */
