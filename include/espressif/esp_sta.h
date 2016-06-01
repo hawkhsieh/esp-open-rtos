@@ -16,7 +16,7 @@ extern "C" {
 
 struct sdk_station_config {
     uint8_t ssid[32];
-    uint8_t password[64];
+    uint8_t password[32];
     uint8_t bssid_set;
     uint8_t bssid[6];
 };

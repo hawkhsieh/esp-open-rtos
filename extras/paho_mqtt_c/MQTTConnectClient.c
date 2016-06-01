@@ -16,7 +16,7 @@
 #include <espressif/esp_common.h>
 #include "MQTTPacket.h"
 #include "StackTrace.h"
-
+#include "asdLog.h"
 #include <string.h>
 
 /**
@@ -67,6 +67,7 @@ int  MQTTSerialize_connect(unsigned char* buf, int buflen, MQTTPacket_connectDat
 	if (MQTTPacket_len(len = MQTTSerialize_connectLength(options)) > buflen)
 	{
 		rc = MQTTPACKET_BUFFER_TOO_SHORT;
+        errf("buffer too short\n");
 		goto exit;
 	}
 
@@ -140,13 +141,17 @@ int  MQTTDeserialize_connack(unsigned char* sessionPresent, unsigned char* conna
 
 	FUNC_ENTRY;
 	header.byte = readChar(&curdata);
-	if (header.bits.type != CONNACK)
+    if (header.bits.type != CONNACK){
+        errf("type=%d\n",header.bits.type);
 		goto exit;
+    }
 
 	curdata += (rc = MQTTPacket_decodeBuf(curdata, &mylen)); /* read remaining length */
 	enddata = curdata + mylen;
-	if (enddata - curdata < 2)
-		goto exit;
+    if (enddata - curdata < 2){
+        errf("recv %d < 2\n",enddata - curdata);
+        goto exit;
+    }
 
 	flags.all = readChar(&curdata);
 	*sessionPresent = flags.bits.sessionpresent;

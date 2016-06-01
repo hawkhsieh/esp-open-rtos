@@ -18,13 +18,13 @@
 
 /* You can use http://test.mosquitto.org/ to test mqtt_client instead
  * of setting up your own MQTT server */
-#define MQTT_HOST ("test.mosquitto.org")
-#define MQTT_PORT 1883
+#define MQTT_HOST ("mqtt.astra.cloud")
+#define MQTT_PORT "443"
 
-#define MQTT_USER NULL
-#define MQTT_PASS NULL
+#define MQTT_USER "6257d2addedc54dbaac8aa6a79aa06c6"
+#define MQTT_PASS "de59b082a13b9ecb951dd3b5d771e1c9"
 
-xSemaphoreHandle wifi_alive;
+//xSemaphoreHandle wifi_alive;
 xQueueHandle publish_queue;
 #define PUB_MSG_LEN 16
 
@@ -43,7 +43,6 @@ static void  beat_task(void *pvParameters)
         }
     }
 }
-
 static void  topic_received(MessageData *md)
 {
     int i;
@@ -86,82 +85,81 @@ static const char *  get_my_id(void)
 
 static void  mqtt_task(void *pvParameters)
 {
-    int ret         = 0;
-    struct Network network;
-    MQTTClient client   = DefaultClient;
-    char mqtt_client_id[20];
-    uint8_t mqtt_buf[100];
-    uint8_t mqtt_readbuf[100];
-    MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
+	int ret			= 0;
+	struct Network network;
+	MQTTClient client	= DefaultClient;
+	char mqtt_client_id[20];
+	uint8_t mqtt_buf[100];
+	uint8_t mqtt_readbuf[100];
+	MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
 
-    NewNetwork( &network );
-    memset(mqtt_client_id, 0, sizeof(mqtt_client_id));
-    strcpy(mqtt_client_id, "ESP-");
-    strcat(mqtt_client_id, get_my_id());
+	NewNetwork( &network );
+	memset(mqtt_client_id, 0, sizeof(mqtt_client_id));
+	strcpy(mqtt_client_id, "ESP-");
+	strcat(mqtt_client_id, get_my_id());
 
-    while(1) {
-        xSemaphoreTake(wifi_alive, portMAX_DELAY);
-        printf("%s: started\n\r", __func__);
-        printf("%s: (Re)connecting to MQTT server %s ... ",__func__,
-               MQTT_HOST);
-        ret = ConnectNetwork(&network, MQTT_HOST, MQTT_PORT);
-        if( ret ){
-            printf("error: %d\n\r", ret);
-            taskYIELD();
-            continue;
-        }
-        printf("done\n\r");
-        NewMQTTClient(&client, &network, 5000, mqtt_buf, 100,
-                      mqtt_readbuf, 100);
+	while(1) {
+    //	xSemaphoreTake(wifi_alive, portMAX_DELAY);
+        infof("Connecting to MQTT server %s\n",MQTT_HOST);
+        infof("heap=%u\n", xPortGetFreeHeapSize());
 
-        data.willFlag       = 0;
-        data.MQTTVersion    = 3;
-        data.clientID.cstring   = mqtt_client_id;
-        data.username.cstring   = MQTT_USER;
-        data.password.cstring   = MQTT_PASS;
-        data.keepAliveInterval  = 10;
-        data.cleansession   = 0;
-        printf("Send MQTT connect ... ");
-        ret = MQTTConnect(&client, &data);
+		ret = ConnectNetwork(&network, MQTT_HOST, MQTT_PORT);
+		if( ret ){
+            errf("error: %d\n\r", ret);
+			taskYIELD();
+			continue;
+		}
+		printf("done\n\r");
+		NewMQTTClient(&client, &network, 5000, mqtt_buf, 100, 
+				mqtt_readbuf, 100);
+
+		data.willFlag		= 0;
+		data.MQTTVersion	= 3;
+		data.clientID.cstring	= mqtt_client_id;
+		data.username.cstring	= MQTT_USER;
+		data.password.cstring	= MQTT_PASS;
+        data.keepAliveInterval	= 0;
+		data.cleansession	= 0;
+		printf("Send MQTT connect ... ");
+		ret = MQTTConnect(&client, &data);
         if(ret){
-            printf("error: %d\n\r", ret);
-            DisconnectNetwork(&network);
-            taskYIELD();
-            continue;
-        }
-        printf("done\r\n");
-        MQTTSubscribe(&client, "/esptopic", QOS1, topic_received);
+            errf("error: %d\n\r", ret);
+			DisconnectNetwork(&network);
+			taskYIELD();
+			continue;
+		}
+        infof("heap=%u\n", xPortGetFreeHeapSize());
+		printf("done\r\n");
+        MQTTSubscribe(&client, "devices/" MQTT_USER "/update", QOS1, topic_received);
         xQueueReset(publish_queue);
 
-        while(1){
+		while(1){
 
-            char msg[PUB_MSG_LEN - 1] = "\0";
-            while(xQueueReceive(publish_queue, (void *)msg, 0) ==
-                  pdTRUE){
-                printf("got message to publish\r\n");
-                MQTTMessage message;
-                message.payload = msg;
-                message.payloadlen = PUB_MSG_LEN;
-                message.dup = 0;
-                message.qos = QOS1;
-                message.retained = 0;
-                ret = MQTTPublish(&client, "/beat", &message);
-                if (ret != SUCCESS ){
-                    printf("error while publishing message: %d\n", ret );
-                    break;
-                }
+			char msg[PUB_MSG_LEN - 1] = "\0";
+            while(xQueueReceive(publish_queue, (void *)msg, 0) == pdTRUE){
+				printf("got message to publish\r\n");
+				MQTTMessage message;
+				message.payload	= msg;
+				message.payloadlen = PUB_MSG_LEN;
+				message.dup = 0;
+				message.qos = QOS1;
+				message.retained = 0;
+                ret = MQTTPublish(&client, "devices/"MQTT_USER"/status", &message);
+				if (ret != SUCCESS ){
+					printf("error while publishing message: %d\n", ret );
+					break;
+				}
             }
 
-            ret = MQTTYield(&client, 1000);
-            if (ret == DISCONNECTED)
-                break;
-        }
-        printf("Connection dropped, request restart\n\r");
-        DisconnectNetwork(&network);
-        taskYIELD();
-    }
+			ret = MQTTYield(&client, 1000);
+			if (ret == DISCONNECTED)
+				break;
+		}
+		printf("Connection dropped, request restart\n\r");
+		taskYIELD();
+	}
 }
-
+#if 0
 static void  wifi_task(void *pvParameters)
 {
     uint8_t status  = 0;
@@ -208,15 +206,24 @@ static void  wifi_task(void *pvParameters)
         vTaskDelay( 1000 / portTICK_RATE_MS );
     }
 }
-
+#endif
 void user_init(void)
 {
     uart_set_baud(0, 115200);
     printf("SDK version:%s\n", sdk_system_get_sdk_version());
 
-    vSemaphoreCreateBinary(wifi_alive);
+        struct sdk_station_config config = {
+        .ssid = WIFI_SSID,
+        .password = WIFI_PASS,
+    };
+
+    sdk_wifi_set_opmode(STATION_MODE);
+    sdk_wifi_station_set_config(&config);
+
+
+//    vSemaphoreCreateBinary(wifi_alive);
     publish_queue = xQueueCreate(3, PUB_MSG_LEN);
-    xTaskCreate(&wifi_task, (int8_t *)"wifi_task",  256, NULL, 2, NULL);
+//    xTaskCreate(&wifi_task, (int8_t *)"wifi_task",  256, NULL, 2, NULL);
     xTaskCreate(&beat_task, (int8_t *)"beat_task", 256, NULL, 3, NULL);
-    xTaskCreate(&mqtt_task, (int8_t *)"mqtt_task", 1024, NULL, 4, NULL);
+    xTaskCreate(&mqtt_task, (int8_t *)"mqtt_task", 2048, NULL, 4, NULL);
 }

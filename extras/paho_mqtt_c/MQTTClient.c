@@ -16,6 +16,11 @@
 #include <espressif/esp_common.h>
 #include <lwip/arch.h>
 #include "MQTTClient.h"
+#include "asdLog.h"
+
+#include "asdLog.h"
+
+#include "asdLog.h"
 
 void  NewMessageData(MessageData* md, MQTTString* aTopicName, MQTTMessage* aMessgage) {
     md->topic = aTopicName;
@@ -36,8 +41,10 @@ int  sendPacket(MQTTClient* c, int length, Timer* timer)
     while (sent < length && !expired(timer))
     {
         rc = c->ipstack->mqttwrite(c->ipstack, &c->buf[sent], length, left_ms(timer));
-        if (rc < 0)  // there was an error writing the data
+        if (rc < 0){  // there was an error writing the data
+            errf("rc=%d\n",rc);
             break;
+        }
         sent += rc;
     }
     if (sent == length)
@@ -45,8 +52,10 @@ int  sendPacket(MQTTClient* c, int length, Timer* timer)
         countdown(&(c->ping_timer), c->keepAliveInterval); // record the fact that we have successfully sent the packet
         rc = SUCCESS;
     }
-    else
+    else{
+        errf("%d != %d\n",sent , length);
         rc = FAILURE;
+    }
     return rc;
 }
 
@@ -154,6 +163,7 @@ int  deliverMessage(MQTTClient* c, MQTTString* topicName, MQTTMessage* message)
                 MessageData md;
                 NewMessageData(&md, topicName, message);
                 c->messageHandlers[i].fp(&md);
+                bzero( md.message->payload , md.message->payloadlen );
                 rc = SUCCESS;
             }
         }
@@ -206,7 +216,6 @@ int  keepalive(MQTTClient* c)
         // re-arm ping counter
         countdown(&(c->ping_timer), c->keepAliveInterval);
     }
-
 exit:
     return rc;
 }
@@ -217,13 +226,15 @@ int  cycle(MQTTClient* c, Timer* timer)
     // read the socket, see what work is due
     unsigned short packet_type = readPacket(c, timer);
 
-    int len = 0,
-        rc = SUCCESS;
+    int len = 0, rc = SUCCESS;
+
+//    infof("packet_type=%d\n",packet_type);
 
     switch (packet_type)
     {
         case CONNACK:
         case PUBACK:
+            break;
         case SUBACK:
             break;
         case PUBLISH:
@@ -272,8 +283,10 @@ int  cycle(MQTTClient* c, Timer* timer)
             }
             break;
     }
+
     if (c->isconnected)
         rc = keepalive(c);
+
 exit:
     if (rc == SUCCESS)
         rc = packet_type;
@@ -313,10 +326,12 @@ int  MQTTYield(MQTTClient* c, int timeout_ms)
         rc = cycle(c, &timer);
         // cycle could return 0 or packet_type or 65535 if nothing is read
         // cycle returns DISCONNECTED only if keepalive() fails.
-        if (rc == DISCONNECTED)
-            break;
+        if (rc == DISCONNECTED){
+             break;
+        }
         rc = SUCCESS;
     }
+
     return rc;
 }
 
@@ -347,8 +362,10 @@ int  MQTTConnect(MQTTClient* c, MQTTPacket_connectData* options)
     InitTimer(&connect_timer);
     countdown_ms(&connect_timer, c->command_timeout_ms);
 
-    if (c->isconnected) // don't send connect packet again if we are already connected
+    if (c->isconnected){ // don't send connect packet again if we are already connected
+        errf("not connected\n");
         goto exit;
+    }
 
     if (options == 0)
         options = &default_options; // set default options if none were supplied
@@ -356,10 +373,14 @@ int  MQTTConnect(MQTTClient* c, MQTTPacket_connectData* options)
     c->keepAliveInterval = options->keepAliveInterval;
     countdown(&(c->ping_timer), c->keepAliveInterval);
 
-    if ((len = MQTTSerialize_connect(c->buf, c->buf_size, options)) <= 0)
+    if ((len = MQTTSerialize_connect(c->buf, c->buf_size, options)) <= 0){
+        errf("connect failed\n");
         goto exit;
-    if ((rc = sendPacket(c, len, &connect_timer)) != SUCCESS)  // send the connect packet
+    }
+    if ((rc = sendPacket(c, len, &connect_timer)) != SUCCESS){  // send the connect packet
+        errf("send failed\n");
         goto exit; // there was a problem
+    }
 
     // this will be a blocking call, wait for the connack
     if (waitfor(c, CONNACK, &connect_timer) == CONNACK)
@@ -368,11 +389,15 @@ int  MQTTConnect(MQTTClient* c, MQTTPacket_connectData* options)
         char sessionPresent = 0;
         if (MQTTDeserialize_connack((unsigned char*)&sessionPresent, &connack_rc, c->readbuf, c->readbuf_size) == 1)
             rc = connack_rc;
-        else
+        else{
+            errf("ack failed\n");
             rc = FAILURE;
+        }
     }
-    else
+    else{
+        errf("no CONNACK\n");
         rc = FAILURE;
+    }
 
 exit:
     if (rc == SUCCESS)

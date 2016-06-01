@@ -24,6 +24,14 @@
 #include <FreeRTOS.h>
 #include <portmacro.h>
 
+#include "mbedtls/ssl.h"
+#include "mbedtls/net.h"
+#include "mbedtls/config.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+
+#include "asdTLS.h"
+
 typedef struct Timer Timer;
 
 struct Timer
@@ -35,7 +43,8 @@ typedef struct Network Network;
 
 struct Network
 {
-	int my_socket;
+    TLSConnect tls;
+
 	int (*mqttread) (Network*, unsigned char*, int, int);
 	int (*mqttwrite) (Network*, unsigned char*, int, int);
 };
@@ -52,7 +61,7 @@ int mqtt_esp_write(Network*, unsigned char*, int, int);
 void mqtt_esp_disconnect(Network*);
 
 void NewNetwork(Network* n);
-int ConnectNetwork(Network* n, const char* host, int port);
+int ConnectNetwork(Network* n, const char* host, char *port);
 int DisconnectNetwork(Network* n);
 
 
