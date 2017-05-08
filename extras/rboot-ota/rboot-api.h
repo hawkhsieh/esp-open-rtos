@@ -33,6 +33,11 @@ typedef struct {
 	uint8 extra_bytes[4];
 } rboot_write_status;
 
+typedef  enum {
+    FIRMWARE_ESP=0,
+    FIRMWARE_RTOS=1
+}FIRMWARE;
+ 
 /**	@brief	Read rBoot configuration from flash
  *	@retval rboot_config Copy of the rBoot configuration
  *  @note   Returns rboot_config (defined in rboot.h) allowing you to modify any values

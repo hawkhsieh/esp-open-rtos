@@ -13,6 +13,6 @@
 #ifndef __SSID_CONFIG_H__
 #define __SSID_CONFIG_H__
 
-#include "private_ssid_config.h"
+//#include "private_ssid_config.h"
 
 #endif // __SSID_CONFIG_H__

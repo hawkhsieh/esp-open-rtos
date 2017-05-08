@@ -9,7 +9,7 @@
 	url = https://github.com/zserge/jsmn.git
 [submodule "bootloader/rboot"]
 	path = bootloader/rboot
-	url = https://github.com/raburton/rboot.git
+	url = https://github.com/hawkhsieh/rboot.git
 [submodule "extras/spiffs/spiffs"]
 	path = extras/spiffs/spiffs
 	url = https://github.com/pellepl/spiffs.git
@@ -28,3 +28,6 @@
 [submodule "extras/crc_generic/crc_lib"]
 	path = extras/crc_generic/crc_lib
 	url = https://github.com/Zaltora/crc_generic_lib.git
+[submodule "extras/AstraDriver"]
+	path = extras/AstraDriver
+	url = git@github.com:miiicasa/AstraDriver.git

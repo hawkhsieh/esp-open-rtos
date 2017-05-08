@@ -24,6 +24,17 @@
 #include <FreeRTOS.h>
 #include <portmacro.h>
 
+#define MQTT_TLS
+#ifdef MQTT_TLS
+#include "mbedtls/ssl.h"
+#include "mbedtls/net.h"
+#include "mbedtls/config.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+
+#include "asdTLS.h"
+#endif
+
 typedef struct mqtt_timer mqtt_timer_t;
 
 struct mqtt_timer
@@ -35,7 +46,11 @@ typedef struct mqtt_network mqtt_network_t;
 
 struct mqtt_network
 {
+#ifdef MQTT_TLS
+    TLSConnect tls;
+#else
 	int my_socket;
+#endif
 	int (*mqttread) (mqtt_network_t*, unsigned char*, int, int);
 	int (*mqttwrite) (mqtt_network_t*, unsigned char*, int, int);
 };

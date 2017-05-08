@@ -16,7 +16,7 @@
 #include <espressif/esp_common.h>
 #include "MQTTPacket.h"
 #include "StackTrace.h"
-
+#include "asdLog.h"
 #include <string.h>
 
 /**

@@ -16,6 +16,7 @@
 #include <espressif/esp_common.h>
 #include <lwip/arch.h>
 #include "MQTTClient.h"
+#include "asdLog.h"
 
 static void new_message_data(mqtt_message_data_t* md, mqtt_string_t* aTopicName, mqtt_message_t* aMessgage) {
     md->topic = aTopicName;
@@ -36,8 +37,10 @@ static int send_packet(mqtt_client_t* c, int length, mqtt_timer_t* timer)
     while (sent < length && !mqtt_timer_expired(timer))
     {
         rc = c->ipstack->mqttwrite(c->ipstack, &c->buf[sent], length - sent, mqtt_timer_left_ms(timer));
-        if (rc < 0)  // there was an error writing the data
+        if (rc < 0){  // there was an error writing the data
+            errf("rc=%d\n",rc);
             break;
+        }
         sent += rc;
     }
     if (sent == length)
@@ -45,8 +48,10 @@ static int send_packet(mqtt_client_t* c, int length, mqtt_timer_t* timer)
         mqtt_timer_countdown(&(c->ping_timer), c->keepAliveInterval); // record the fact that we have successfully sent the packet
         rc = MQTT_SUCCESS;
     }
-    else
+    else{
+        errf("%d != %d\n",sent , length);
         rc = MQTT_FAILURE;
+    }
     return rc;
 }
 
@@ -97,6 +102,7 @@ static int read_packet(mqtt_client_t* c, mqtt_timer_t* timer)
     len += decode_packet(c, &rem_len, mqtt_timer_left_ms(timer));
     if (len <= 1 || len + rem_len > c->readbuf_size) /* if packet is too big to fit in our readbuf, abort */
     {
+	    errf("rc=%d\n",rc);
         rc = MQTT_READ_ERROR;
         goto exit;
     }
@@ -104,6 +110,7 @@ static int read_packet(mqtt_client_t* c, mqtt_timer_t* timer)
     /* 3. read the rest of the buffer using a callback to supply the rest of the data */
     if (rem_len > 0 && (c->ipstack->mqttread(c->ipstack, c->readbuf + len, rem_len, mqtt_timer_left_ms(timer)) != rem_len))
     {
+	    errf("rc=%d\n",rc);
         rc = MQTT_READ_ERROR;
         goto exit;
     }
@@ -161,6 +168,7 @@ static int deliver_message(mqtt_client_t* c, mqtt_string_t* topicName, mqtt_mess
                 mqtt_message_data_t md;
                 new_message_data(&md, topicName, message);
                 c->messageHandlers[i].fp(&md);
+                bzero( md.message->payload , md.message->payloadlen );
                 rc = MQTT_SUCCESS;
             }
         }
@@ -369,10 +377,14 @@ int  mqtt_connect(mqtt_client_t* c, mqtt_packet_connect_data_t* options)
     c->keepAliveInterval = options->keepAliveInterval;
     mqtt_timer_countdown(&(c->ping_timer), c->keepAliveInterval);
 
-    if ((len = mqtt_serialize_connect(c->buf, c->buf_size, options)) <= 0)
+    if ((len = mqtt_serialize_connect(c->buf, c->buf_size, options)) <= 0){
+	    errf("connect failed\n");
         goto exit;
-    if ((rc = send_packet(c, len, &connect_timer)) != MQTT_SUCCESS)  // send the connect packet
+	}
+    if ((rc = send_packet(c, len, &connect_timer)) != MQTT_SUCCESS){  // send the connect packet
+        errf("connect failed\n");
         goto exit; // there was a problem
+    }
 
     // this will be a blocking call, wait for the connack
     if (waitfor(c, MQTTPACKET_CONNACK, &connect_timer) == MQTTPACKET_CONNACK)
@@ -381,8 +393,10 @@ int  mqtt_connect(mqtt_client_t* c, mqtt_packet_connect_data_t* options)
         char sessionPresent = 0;
         if (mqtt_deserialize_connack((unsigned char*)&sessionPresent, &connack_rc, c->readbuf, c->readbuf_size) == 1)
             rc = connack_rc;
-        else
+        else{
+            errf("ack failed\n");
             rc = MQTT_FAILURE;
+        }
     }
     else
         rc = MQTT_FAILURE;
