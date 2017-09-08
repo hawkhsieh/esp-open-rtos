@@ -172,7 +172,6 @@ int  mqtt_esp_read(mqtt_network_t* n, unsigned char* buffer, int len, int timeou
     }
 
     if ( ret == -76 ){
-        errf("ret=-76\n");
         int rc = 0;
         struct timeval tv;
         fd_set fdset;
