@@ -29,6 +29,7 @@ void user_init(void)
     printf("gitver=%s\n",SRC_VERSION);
 
     Config_Init();
+    setLogLevel(atoi(Config_getLog())); //boot
     Platform_PrintHeap("booting");
 
     xTaskCreate(&astraLenServ, (int8_t *)"astraLenServ", 600 , NULL, 1, NULL);
