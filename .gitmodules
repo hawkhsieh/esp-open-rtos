@@ -30,4 +30,4 @@
 	url = https://github.com/Zaltora/crc_generic_lib.git
 [submodule "extras/AstraDriver"]
 	path = extras/AstraDriver
-	url = git@github.com:miiicasa/AstraDriver.git
+	url = git@github.com:astracloud/AstraDriver.git
