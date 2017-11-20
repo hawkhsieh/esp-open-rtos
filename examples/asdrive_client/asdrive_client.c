@@ -32,6 +32,5 @@ void user_init(void)
     setLogLevel(atoi(Config_getLog())); //boot
     Platform_PrintHeap("booting");
 
-    xTaskCreate(&astraLenServ, (int8_t *)"astraLenServ", 600 , NULL, 1, NULL);
-    xTaskCreate(&astraClient, (int8_t *)"astraClient", 1000, NULL, 1, NULL);
+    xTaskCreate(&astraClient, "astraClient", 1200, NULL, 1, NULL);
 }

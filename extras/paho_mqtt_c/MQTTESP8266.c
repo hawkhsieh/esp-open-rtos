@@ -213,7 +213,7 @@ int  mqtt_network_connect(mqtt_network_t* n, const char* host, int port)
         return -1;
     }
     char portStr[16];
-    snprintf(portStr,"%d",port);
+    snprintf(portStr,sizeof(portStr),"%d",port);
     if ( (ret = TLSConnect_OpenFD( &n->tls , (char*)host , portStr )) != 0 ) {
         TLSConnect_Destroy(&n->tls);
         errf("ret=%d\n",ret);
