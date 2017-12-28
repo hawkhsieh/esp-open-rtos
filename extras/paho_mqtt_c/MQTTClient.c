@@ -41,6 +41,9 @@ static int send_packet(mqtt_client_t* c, int length, mqtt_timer_t* timer)
             errf("rc=%d\n",rc);
             break;
         }
+        if (rc==0){
+            infof("retry mqttwrite\n");
+        }
         sent += rc;
     }
     if (sent == length)

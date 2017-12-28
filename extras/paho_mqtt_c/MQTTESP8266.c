@@ -180,7 +180,7 @@ int  mqtt_esp_read(mqtt_network_t* n, unsigned char* buffer, int len, int timeou
         FD_SET(n->tls.ctx.fd, &fdset);
         //It seems tv_sec actually means FreeRTOS tick
         tv.tv_sec = timeout_ms / 1000;
-        tv.tv_usec = timeout_ms % 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000 ;
         rc = select(n->tls.ctx.fd + 1, &fdset, 0, 0, &tv);
         if ((rc > 0) && (FD_ISSET(n->tls.ctx.fd, &fdset)))
         {
@@ -238,9 +238,9 @@ int  mqtt_esp_write(mqtt_network_t* n, unsigned char* buffer, int len, int timeo
     int rc = 0;
     FD_ZERO(&fdset);
     FD_SET(n->tls.ctx.fd, &fdset);
-    // It seems tv_sec actually means FreeRTOS tick
-    tv.tv_sec = timeout_ms / portTICK_PERIOD_MS;
-    tv.tv_usec = 0;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    debugf("timeout:%lus + %ld us\n",tv.tv_sec,tv.tv_usec);
     rc = select(n->tls.ctx.fd + 1, 0, &fdset, 0, &tv);
     if ((rc > 0) && (FD_ISSET(n->tls.ctx.fd, &fdset)))
     {
@@ -257,7 +257,10 @@ int  mqtt_esp_write(mqtt_network_t* n, unsigned char* buffer, int len, int timeo
     }
     else
     {
-        errf("errno=%d\n",errno);
+        if (errno == 0)
+            return 0;
+
+        errf("select errno=%d\n",errno);
         // select fail
         return -1;
     }
