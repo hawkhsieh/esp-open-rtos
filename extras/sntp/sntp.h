@@ -35,7 +35,7 @@
  * implementation. If it is set to 1, a dst hour will be applied. If set
  * to zero, time will not be modified.
  */
-void sntp_initialize(const struct timezone *tz);
+void sntp_initialize(const struct timezone *tz, void (*cb)());
 
 /*
  * Sets time zone. Allowed values are in the range [-11, 13].
