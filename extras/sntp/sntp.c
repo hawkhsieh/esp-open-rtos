@@ -38,7 +38,6 @@
 
 #include <sntp.h>
 
-#include "lwip/timeouts.h"
 #include "lwip/udp.h"
 #include "lwip/dns.h"
 #include "lwip/ip_addr.h"
