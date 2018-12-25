@@ -34,7 +34,7 @@ static int send_packet(mqtt_client_t* c, int length, mqtt_timer_t* timer)
     int rc = MQTT_FAILURE,
         sent = 0;
 
-    while (sent < length && !mqtt_timer_expired(timer))
+    while (sent < length )
     {
         rc = c->ipstack->mqttwrite(c->ipstack, &c->buf[sent], length - sent, mqtt_timer_left_ms(timer));
         if (rc < 0){  // there was an error writing the data
@@ -45,7 +45,13 @@ static int send_packet(mqtt_client_t* c, int length, mqtt_timer_t* timer)
             infof("retry mqttwrite\n");
         }
         sent += rc;
+        /*
+        if ( mqtt_timer_expired(timer) ){
+            errf("mqttwrite timeout\n");
+            break;
+        }*/
     }
+
     if (sent == length)
     {
         mqtt_timer_countdown(&(c->ping_timer), c->keepAliveInterval); // record the fact that we have successfully sent the packet
@@ -219,7 +225,9 @@ static int keepalive(mqtt_client_t* c)
             c->ping_outstanding = 1;
             int len = mqtt_serialize_pingreq(c->buf, c->buf_size);
             if (len > 0)
-                send_packet(c, len, &timer);
+                if ( send_packet(c, len, &timer) == MQTT_FAILURE ){
+                    errf("send_packet failed\n");
+                }
         }
         // re-arm ping counter
         mqtt_timer_countdown(&(c->ping_timer), c->keepAliveInterval);
@@ -262,8 +270,10 @@ static int cycle(mqtt_client_t* c, mqtt_timer_t* timer)
                     rc = MQTT_FAILURE;
                 else
                     rc = send_packet(c, len, timer);
-                if (rc == MQTT_FAILURE)
+                if (rc == MQTT_FAILURE){
+                    errf("send_packet failed\n");
                     goto exit; // there was a problem
+                }
             }
             break;
         }
@@ -275,8 +285,10 @@ static int cycle(mqtt_client_t* c, mqtt_timer_t* timer)
                 rc = MQTT_FAILURE;
             else if ((len = mqtt_serialize_ack(c->buf, c->buf_size, MQTTPACKET_PUBREL, 0, mypacketid)) <= 0)
                 rc = MQTT_FAILURE;
-            else if ((rc = send_packet(c, len, timer)) != MQTT_SUCCESS) // send the PUBREL packet
+            else if ((rc = send_packet(c, len, timer)) != MQTT_SUCCESS){ // send the PUBREL packet
+                errf("send_packet failed\n");
                 rc = MQTT_FAILURE; // there was a problem
+            }
             if (rc == MQTT_FAILURE)
                 goto exit; // there was a problem
             break;
@@ -385,7 +397,7 @@ int  mqtt_connect(mqtt_client_t* c, mqtt_packet_connect_data_t* options)
         goto exit;
 	}
     if ((rc = send_packet(c, len, &connect_timer)) != MQTT_SUCCESS){  // send the connect packet
-        errf("connect failed\n");
+        errf("send_packet failed\n");
         goto exit; // there was a problem
     }
 
@@ -429,6 +441,7 @@ int  mqtt_subscribe(mqtt_client_t* c, const char* topic, enum mqtt_qos qos, mqtt
         goto exit;
     if ((rc = send_packet(c, len, &timer)) != MQTT_SUCCESS) // send the subscribe packet
     {
+        errf("send_packet failed\n");
         goto exit;             // there was a problem
     }
 
@@ -479,8 +492,10 @@ int  mqtt_unsubscribe(mqtt_client_t* c, const char* topicFilter)
 
     if ((len = mqtt_serialize_unsubscribe(c->buf, c->buf_size, 0, get_next_packet_id(c), 1, &topic)) <= 0)
         goto exit;
-    if ((rc = send_packet(c, len, &timer)) != MQTT_SUCCESS) // send the subscribe packet
+    if ((rc = send_packet(c, len, &timer)) != MQTT_SUCCESS){ // send the subscribe packet
+        errf("send_packet failed\n");
         goto exit; // there was a problem
+    }
 
     if (waitfor(c, MQTTPACKET_UNSUBACK, &timer) == MQTTPACKET_UNSUBACK)
     {
@@ -515,10 +530,13 @@ int  mqtt_publish(mqtt_client_t* c, const char* topic, mqtt_message_t* message)
 
     len = mqtt_serialize_publish(c->buf, c->buf_size, 0, message->qos, message->retained, message->id, 
               topicStr, (unsigned char*)message->payload, message->payloadlen);
-    if (len <= 0)
+    if (len <= 0){
+        errf("send_packet failed,ret=%d\n",len);
         goto exit;
+    }
     if ((rc = send_packet(c, len, &timer)) != MQTT_SUCCESS) // send the subscribe packet
     {
+        errf("send_packet failed\n");
         goto exit; // there was a problem
     }
 
@@ -574,9 +592,12 @@ int  mqtt_disconnect(mqtt_client_t* c)
     mqtt_timer_init(&timer);
     mqtt_timer_countdown_ms(&timer, c->command_timeout_ms);
 
-    if (len > 0)
-        rc = send_packet(c, len, &timer);            // send the disconnect packet
-
+    if (len > 0){
+        rc = send_packet(c, len, &timer);            // send the disconnect
+        if (rc != MQTT_SUCCESS){
+            errf("send_packet failed\n");
+        }
+    }
     c->isconnected = 0;
     return rc;
 }

@@ -84,6 +84,9 @@ void  mqtt_timer_countdown_ms(mqtt_timer_t* timer, unsigned int timeout)
 {
     TickType_t now = xTaskGetTickCount();
     timer->end_time = now + timeout / portTICK_PERIOD_MS;
+
+    //infof("timeout:%d,now:%d,endtime:%d\n",timeout,now,timer->end_time);
+
 }
 
 
@@ -97,7 +100,7 @@ int  mqtt_timer_left_ms(mqtt_timer_t* timer)
 {
     TickType_t now = xTaskGetTickCount();
     int32_t left = timer->end_time - now;
-    return (left < 0) ? 0 : left * portTICK_PERIOD_MS;
+    return (left < 0) ? 0 : left*portTICK_PERIOD_MS;
 }
 
 
@@ -233,13 +236,20 @@ int  mqtt_network_disconnect(mqtt_network_t* n)
 
 int  mqtt_esp_write(mqtt_network_t* n, unsigned char* buffer, int len, int timeout_ms)
 {
+    int rc = 0;
+
+#ifdef TIMEOUT
     struct timeval tv;
     fd_set fdset;
-    int rc = 0;
     FD_ZERO(&fdset);
     FD_SET(n->tls.ctx.fd, &fdset);
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (timeout_ms > 0){
+       tv.tv_sec = timeout_ms / 1000;
+       tv.tv_usec = (timeout_ms % 1000) * 1000;
+    }else{
+        tv.tv_sec = 0;
+        tv.tv_usec = 500000;
+    }
     debugf("timeout:%lus + %ld us\n",tv.tv_sec,tv.tv_usec);
     rc = select(n->tls.ctx.fd + 1, 0, &fdset, 0, &tv);
     if ((rc > 0) && (FD_ISSET(n->tls.ctx.fd, &fdset)))
@@ -264,6 +274,17 @@ int  mqtt_esp_write(mqtt_network_t* n, unsigned char* buffer, int len, int timeo
         // select fail
         return -1;
     }
+#else
+    while((rc = mbedtls_ssl_write(&n->tls.ssl, buffer , len)) <= 0)
+    {
+        if(rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE)
+        {
+            errf(" failed\n  ! mbedtls_ssl_write returned %d\n\n", rc);
+            goto exit;
+        }
+    }
+
+#endif
 exit:
     return rc;
 }

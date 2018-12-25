@@ -24,9 +24,10 @@
 
 void user_init(void)
 {
+    Init_LogControl( 0 );
     uart_set_baud(0, 115200);
 
-    printf("gitver:" SRC_VERSION);
+    infof("gitver:" SRC_VERSION);
 
     Config_Init();
     setLogLevel(atoi(Config_getLog())); //boot
