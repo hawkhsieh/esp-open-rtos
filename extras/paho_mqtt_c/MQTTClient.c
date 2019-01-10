@@ -522,8 +522,10 @@ int  mqtt_publish(mqtt_client_t* c, const char* topic, mqtt_message_t* message)
     mqtt_timer_init(&timer);
     mqtt_timer_countdown_ms(&timer, c->command_timeout_ms);
 
-    if (!c->isconnected)
+    if (!c->isconnected){
+        errf("isconnected=0\n");
         goto exit;
+    }
 
     if (message->qos == MQTT_QOS1 || message->qos == MQTT_QOS2)
         message->id = get_next_packet_id(c);
@@ -549,12 +551,15 @@ int  mqtt_publish(mqtt_client_t* c, const char* topic, mqtt_message_t* message)
             unsigned short mypacketid;
             unsigned char dup, type;
             if (mqtt_deserialize_ack(&type, &dup, &mypacketid, c->readbuf, c->readbuf_size) != 1)
+            {
+                errf("mqtt_deserialize_ack != 1\n");
                 rc = MQTT_FAILURE;
-            else
+            }else
                 rc = MQTT_SUCCESS;
         }
         else
         {
+            errf("waitfor != MQTTPACKET_PUBACK\n");
             rc = MQTT_FAILURE;
         }
 
