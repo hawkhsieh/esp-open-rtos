@@ -147,7 +147,6 @@ bool ds18b20_measure(int pin, ds18b20_addr_t addr, bool wait) {
 bool ds18b20_read_scratchpad(int pin, ds18b20_addr_t addr, uint8_t *buffer) {
     uint8_t crc;
     uint8_t expected_crc;
-
     if (!onewire_reset(pin)) {
         return false;
     }
@@ -162,7 +161,6 @@ bool ds18b20_read_scratchpad(int pin, ds18b20_addr_t addr, uint8_t *buffer) {
         buffer[i] = onewire_read(pin);
     }
     crc = onewire_read(pin);
-
     expected_crc = onewire_crc8(buffer, 8);
     if (crc != expected_crc) {
         debug("CRC check failed reading scratchpad: %02x %02x %02x %02x %02x %02x %02x %02x : %02x (expected %02x)\n", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], crc, expected_crc);
@@ -201,7 +199,7 @@ float ds18b20_measure_and_read(int pin, ds18b20_addr_t addr) {
 }
 
 bool ds18b20_measure_and_read_multi(int pin, ds18b20_addr_t *addr_list, int addr_count, float *result_list) {
-    if (!ds18b20_measure(pin, DS18B20_ANY, true)) {
+    if (!ds18b20_measure(pin, DS18B20_ANY, false)) {
         for (int i=0; i < addr_count; i++) {
             result_list[i] = NAN;
         }
@@ -216,7 +214,9 @@ int ds18b20_scan_devices(int pin, ds18b20_addr_t *addr_list, int addr_count) {
     int found = 0;
 
     onewire_search_start(&search);
+
     while ((addr = onewire_search_next(&search, pin)) != ONEWIRE_NONE) {
+
         uint8_t family_id = (uint8_t)addr;
         if (family_id == DS18B20_FAMILY_ID || family_id == DS18S20_FAMILY_ID) {
             if (found < addr_count) {
@@ -225,6 +225,7 @@ int ds18b20_scan_devices(int pin, ds18b20_addr_t *addr_list, int addr_count) {
             found++;
         }
     }
+
     return found;
 }
 
