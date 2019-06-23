@@ -108,6 +108,9 @@ int mbedtls_net_connect( mbedtls_net_context *ctx, const char *host, const char 
             continue;
         }
 
+        const struct timeval timeout = { 1000, 0 }; /* 60 second timeout */
+        setsockopt( ctx->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout) );
+        setsockopt( ctx->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout) );
         if( connect( ctx->fd, cur->ai_addr, cur->ai_addrlen ) == 0 )
         {
             ret = 0;
